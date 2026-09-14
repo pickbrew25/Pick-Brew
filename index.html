@@ -7124,7 +7124,40 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     }
     body.appendChild(sales);
 
-    // Paid out is editable: not every expense is settled from the drawer.
+    // Itemized expenses during this shift
+    const shiftFrom=new Date(sh.startedAt).getTime();
+    const shiftTo=sh.endedAt?new Date(sh.endedAt).getTime():Date.now();
+    const shiftExps=(S.expenses||[]).filter(function(e){
+      const t=new Date(e.date).getTime();
+      return !isNaN(t)&&t>=shiftFrom&&t<=shiftTo;
+    });
+
+    if(shiftExps.length>0){
+      const ef=document.createElement('div');
+      ef.style.cssText='background:var(--wg);border:1.5px solid var(--wt);border-radius:0;padding:11px 13px;margin:8px 0';
+      const eh=document.createElement('div');
+      eh.style.cssText='font-size:10px;font-weight:700;color:var(--wt);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px';
+      eh.textContent='Expenses this shift (deducted from drawer)';
+      ef.appendChild(eh);
+      shiftExps.forEach(function(e){
+        const er=document.createElement('div');
+        er.style.cssText='display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:3px 0;border-bottom:1px solid rgba(122,78,16,0.15)';
+        const el=document.createElement('span');
+        el.style.cssText='color:var(--t2);flex:1;padding-right:8px';
+        el.textContent=e.name+(e.note?' · '+e.note:'');
+        const ev=document.createElement('span');
+        ev.style.cssText='font-weight:700;color:var(--wt);flex-shrink:0';
+        ev.textContent='− '+fmt(+e.amount||0);
+        er.appendChild(el);er.appendChild(ev);ef.appendChild(er);
+      });
+      const et=document.createElement('div');
+      et.style.cssText='display:flex;justify-content:space-between;font-size:13px;font-weight:800;color:var(--wt);padding-top:7px;margin-top:3px;border-top:1.5px solid var(--wt)';
+      et.innerHTML='<span>Total expenses</span><span>− '+fmt(autoPaid)+'</span>';
+      ef.appendChild(et);
+      body.appendChild(ef);
+    }
+
+    // Paid out — prefilled from expenses, cashier can adjust if some weren't from drawer
     const pf=document.createElement('div');pf.className='mf';pf.style.marginTop='4px';
     pf.innerHTML='<label>Cash paid out of drawer (PHP)</label>';
     const pi=document.createElement('input');pi.id='csPaid';pi.type='number';pi.min='0';pi.step='any';
@@ -7132,11 +7165,11 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     pf.appendChild(pi);
     const ph=document.createElement('div');ph.style.cssText='font-size:11.5px;color:var(--t3);line-height:1.5';
     ph.textContent=autoPaid>0
-      ?'Pre-filled from '+fmt(autoPaid)+' of expenses logged during this shift. Adjust if any were not paid from the drawer.'
-      :'Leave at 0 if nothing was paid out of the drawer.';
+      ?'Pre-filled from '+fmt(autoPaid)+' of expenses above. Adjust if any were not paid from the drawer.'
+      :'No expenses logged this shift. Enter manually if cash was paid out.';
     pf.appendChild(ph);body.appendChild(pf);
 
-    // Expected cash, recomputed live as the two inputs change.
+    // Expected cash — recomputed live
     const calc=document.createElement('div');
     calc.style.cssText='background:var(--bg0);border:1px solid var(--b1);border-radius:0;padding:11px 13px;margin:12px 0';
     body.appendChild(calc);
@@ -7162,12 +7195,12 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
       calc.innerHTML='';
       const ch=document.createElement('div');
       ch.style.cssText='font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px';
-      ch.textContent='What the drawer should hold';
+      ch.textContent='Expected cash in drawer';
       calc.appendChild(ch);
       calc.appendChild(drawerRow('Opening float',fmt(sh.openingFloat||0)));
       calc.appendChild(drawerRow('+ Cash sales',fmt(bd.cash),{color:'var(--st)'}));
-      calc.appendChild(drawerRow('− Cash paid out',fmt(paid),{color:paid>0?'var(--wt)':'var(--t2)'}));
-      calc.appendChild(drawerRow('Expected cash',fmt(exp),{big:true,rule:true,color:'var(--ac)'}));
+      calc.appendChild(drawerRow('− Expenses / paid out',fmt(paid),{color:paid>0?'var(--wt)':'var(--t2)'}));
+      calc.appendChild(drawerRow('= Expected cash',fmt(exp),{big:true,rule:true,color:'var(--ac)'}));
 
       const raw=ci.value;
       if(raw===''||raw===undefined||isNaN(parseFloat(raw))){
