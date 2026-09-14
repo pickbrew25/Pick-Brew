@@ -48,6 +48,9 @@ input,select,textarea{user-select:text;-webkit-user-select:text}
 .brand-name{font-size:16px;font-weight:700;flex:1}
 .brand-tag{font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;background:var(--ac2);color:var(--ac)}
 .net-status-wrap{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:var(--t3)}
+.install-btn{display:none;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;border:1.5px solid var(--b2);background:var(--bg2);color:var(--t1);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:0.3px}
+.install-btn:active{background:var(--bg3)}
+.install-btn.visible{display:flex}
 .topnav-tabs{display:flex;overflow-x:auto;padding:0 4px}
 .topnav-tabs::-webkit-scrollbar{height:0}
 .tab{flex:1;min-width:60px;padding:10px 8px;font-size:11px;font-weight:700;color:var(--t3);border:none;background:none;cursor:pointer;border-bottom:2.5px solid transparent;text-align:center;letter-spacing:0.3px;white-space:nowrap}
@@ -1431,6 +1434,20 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 </head>
 <body>
 <div id="app"><div class="toasts" id="toasts"></div></div>
+<script>
+/* PWA install prompt capture — must run as early as possible */
+window._pwaInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  window._pwaInstallPrompt = e;
+  // Show any install button already in the DOM
+  document.querySelectorAll('.install-btn').forEach(function(btn){ btn.classList.add('visible'); });
+});
+window.addEventListener('appinstalled', function() {
+  window._pwaInstallPrompt = null;
+  document.querySelectorAll('.install-btn').forEach(function(btn){ btn.classList.remove('visible'); });
+});
+</script>
 <script>
 const CUR='PHP ',TAX=0.12;
 const CREATOR_PASS='Admin2026';
@@ -4292,6 +4309,23 @@ function renderTopNav(app){
     };
     brand.appendChild(cb);
   }
+  // PWA Install button
+  const instBtn=document.createElement('button');
+  instBtn.className='install-btn'+(window._pwaInstallPrompt?' visible':'');
+  instBtn.title='Install app';
+  instBtn.innerHTML='&#8659; Install';
+  instBtn.onclick=function(){
+    if(!window._pwaInstallPrompt)return;
+    window._pwaInstallPrompt.prompt();
+    window._pwaInstallPrompt.userChoice.then(function(result){
+      if(result.outcome==='accepted'){
+        window._pwaInstallPrompt=null;
+        instBtn.classList.remove('visible');
+      }
+    });
+  };
+  brand.appendChild(instBtn);
+
   nav.appendChild(brand);
 
   const tabs=document.createElement('div');tabs.className='topnav-tabs';
