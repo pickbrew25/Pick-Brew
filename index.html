@@ -4327,14 +4327,24 @@ function renderTopNav(app){
             instBtn.classList.remove('visible');
           }
         });
+        return;
+      }
+      // Detect browser and show tailored instructions
+      const ua=navigator.userAgent;
+      const isIOS=/iPad|iPhone|iPod/.test(ua)&&!window.MSStream;
+      const isEdge=/Edg\//.test(ua);
+      const isSamsung=/SamsungBrowser/.test(ua);
+      const isChrome=/Chrome\//.test(ua)&&!isEdge;
+      if(isIOS){
+        uiAlert('1. Tap the Share button ⎋ at the bottom of Safari\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" in the top right',{title:'Install on iPhone / iPad',tone:'info'});
+      } else if(isEdge){
+        uiAlert('1. Tap the ⋮ menu (top right)\n2. Scroll down in the menu\n3. Tap "Add to phone"\n\nIf "Add to phone" is missing, tap ⋮ → Settings → and look for "Add to Home screen".',{title:'Install in Edge',tone:'info'});
+      } else if(isSamsung){
+        uiAlert('1. Tap the ☰ menu (bottom right)\n2. Tap "Add page to"\n3. Tap "Home screen"\n4. Tap "Add"',{title:'Install in Samsung Internet',tone:'info'});
+      } else if(isChrome){
+        uiAlert('1. Tap the ⋮ menu (top right)\n2. Tap "Add to Home screen" or "Install app"\n3. Tap "Install"\n\nIf the option is missing, try visiting the site a few more times first — Chrome requires a minimum engagement before showing the install option.',{title:'Install in Chrome',tone:'info'});
       } else {
-        // iOS / unsupported browser — show manual instructions
-        const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
-        if(isIOS){
-          uiAlert('To install on iOS:\n1. Tap the Share button (box with arrow) in Safari\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add"',{title:'Install on iPhone / iPad',tone:'info'});
-        } else {
-          uiAlert('To install:\nOpen this page in Chrome or Edge, then tap the menu (⋮) and select "Install app" or "Add to Home Screen".',{title:'Install App',tone:'info'});
-        }
+        uiAlert('Open this site in Chrome, Edge, or Samsung Internet, then use the browser menu (⋮) to find "Install app" or "Add to Home screen".',{title:'Install App',tone:'info'});
       }
     };
     brand.appendChild(instBtn);
