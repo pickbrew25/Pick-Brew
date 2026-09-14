@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Arroyo POS &mdash; Deployment self-test</title>
+<script>
+const STCFG={"bizId":"b34297ff-1279-4457-9ff9-5839c7bf5e84","bizName":"Pick&Brew Coffee Shop","sbUrl":"https://vxrwhcxvlzflokevohdx.supabase.co","sbKey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ4cndoY3h2bHpmbG9rZXZvaGR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNjU4NTIsImV4cCI6MjEwNDk0MTg1Mn0.jzlsexJ600IAYL4jdjU9K_AUZ5tWvjGwVW9sBYwtJSs","posUrl":"https://pickbrew25.github.io/Pick-Brew/","dashUrl":"https://pickbrew25.github.io/Pick-Brew/dashboard/","queueUrl":"","queueOn":false,"prefix":"","ver":"7.4.6"};//QUEUECFG
+</script>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0d1117;--bg1:#161b22;--bg2:#1c2333;--b:#30363d;--t1:#e6edf3;--t2:#8b949e;--t3:#6e7681;
+ --ok:#3fb950;--bad:#f85149;--warn:#d29922;--ac:#2f81f7}
+@media (prefers-color-scheme: light){
+ :root{--bg:#edebe3;--bg1:#faf9f4;--bg2:#ffffff;--b:#d6d2c8;--t1:#1a1a18;--t2:#4a4a45;--t3:#77776e;
+  --ok:#1f6b3a;--bad:#c8241c;--warn:#7a4e10;--ac:#1b3a8c}}
+body{margin:0;background:var(--bg);color:var(--t1);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:22px 16px 60px}
+.wrap{max-width:820px;margin:0 auto}
+h1{font-size:21px;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--t2);font-size:13.5px;margin:0 0 20px}
+.card{background:var(--bg1);border:1px solid var(--b);border-radius:10px;padding:16px;margin-bottom:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);margin:0 0 12px;font-weight:700}
+.links{display:flex;flex-wrap:wrap;gap:10px}
+.links a{flex:1 1 180px;text-align:center;padding:13px 12px;border-radius:8px;border:1px solid var(--b);
+ background:var(--bg2);color:var(--t1);text-decoration:none;font-weight:650;font-size:14px}
+.links a span{display:block;font-weight:400;font-size:11.5px;color:var(--t3);margin-top:3px;word-break:break-all}
+label{display:block;font-size:12px;font-weight:650;color:var(--t2);margin:0 0 5px}
+input[type=email],input[type=password]{width:100%;padding:11px;border-radius:8px;border:1px solid var(--b);
+ background:var(--bg2);color:var(--t1);font-size:14px;margin-bottom:10px}
+.row2{display:flex;gap:10px;flex-wrap:wrap}.row2>div{flex:1 1 220px}
+.chk{display:flex;align-items:flex-start;gap:9px;font-size:13px;color:var(--t2);margin:4px 0 12px;line-height:1.5}
+.chk input{margin-top:3px;flex:none}
+button{padding:13px 18px;border-radius:8px;border:none;background:var(--ac);color:#fff;
+ font-size:14.5px;font-weight:700;cursor:pointer}
+button.ghost{background:var(--bg2);color:var(--t1);border:1px solid var(--b);font-weight:600}
+button:disabled{opacity:.55;cursor:default}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.grp{margin-top:16px}
+.grp-h{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--t3);
+ padding:10px 2px 6px;border-bottom:1px solid var(--b)}
+.t{display:flex;gap:10px;padding:10px 2px;border-bottom:1px solid var(--b);font-size:13.5px;align-items:flex-start}
+.t:last-child{border-bottom:none}
+.badge{flex:none;width:64px;font-size:10.5px;font-weight:800;letter-spacing:.05em;padding:3px 0;
+ text-align:center;border-radius:4px;margin-top:2px}
+.PASS{background:rgba(63,185,80,.15);color:var(--ok)}
+.FAIL{background:rgba(248,81,73,.15);color:var(--bad)}
+.WARN{background:rgba(210,153,34,.15);color:var(--warn)}
+.SKIP{background:rgba(110,118,129,.15);color:var(--t3)}
+.RUN{background:rgba(47,129,247,.15);color:var(--ac)}
+.t-b{flex:1;min-width:0}
+.t-n{font-weight:600}
+.t-d{color:var(--t2);font-size:12.5px;margin-top:2px;word-break:break-word}
+.tally{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;font-weight:700;margin:14px 0 0}
+.hint{font-size:12px;color:var(--t3);line-height:1.6;margin:10px 0 0}
+code{background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:1px 5px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Deployment self-test</h1>
+  <p class="sub" id="subline">Checks the live database and the deployed pages. Run this once after deploying, before handing over.</p>
+
+  <div class="card">
+    <h2>The three apps</h2>
+    <div class="links" id="links"></div>
+  </div>
+
+  <div class="card">
+    <h2>Run the tests</h2>
+    <p class="hint" style="margin:0 0 12px">
+      Tests that only read public data run without signing in. The owner sign-in below unlocks the
+      checks that need a real session &mdash; table access, row-level security and the queue number
+      function. Nothing is stored; the password stays in this tab.
+    </p>
+    <div class="row2">
+      <div><label>Owner email</label><input type="email" id="em" placeholder="owner@email.com" autocomplete="off"/></div>
+      <div><label>Owner password</label><input type="password" id="pw" placeholder="POS sign-in password" autocomplete="off"/></div>
+    </div>
+    <div class="chk">
+      <input type="checkbox" id="wr"/>
+      <label for="wr" style="font-weight:400;color:var(--t2);margin:0">
+        Also run write tests. Creates one clearly-marked test sale, checks the stock trigger and the
+        queue view, then deletes it again. Safe on a fresh deployment; skip it on a shop that is already trading.
+      </label>
+    </div>
+    <div class="btns">
+      <button id="run">Run tests</button>
+      <button class="ghost" id="copy">Copy report</button>
+    </div>
+    <div class="tally" id="tally"></div>
+  </div>
+
+  <div id="out"></div>
+
+  <p class="hint">
+    This page carries only the public anon key, the same one already inside the POS. It is still worth
+    deleting <code>selftest/</code> from the repo once the deployment is signed off &mdash; it is a tool for
+    you, not for the client.
+  </p>
+</div>
+
+<script>
+/* ====================================================================
+ * DEPLOYMENT SELF-TEST
+ * Everything here runs against the client's real Supabase project and
+ * their real GitHub Pages site. These are the checks that cannot be made
+ * on the deployer machine: schema, row-level security, the queue number
+ * function under concurrency, and whether the three deployed pages agree
+ * on one business id.
+ * ==================================================================== */
+'use strict';
+var RESULTS=[], GROUPS=[], TOKEN=null, UID=null;
+
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e;}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+/* ---- links panel ---- */
+(function(){
+  document.title=(STCFG.bizName||'Arroyo POS')+' \u2014 Deployment self-test';
+  document.getElementById('subline').textContent=
+    (STCFG.bizName||'This client')+' \u2014 template '+(STCFG.ver||'?')+
+    '. Run once after deploying, before handing over.';
+  var L=document.getElementById('links');
+  var items=[['POS',STCFG.posUrl],['Dashboard',STCFG.dashUrl]];
+  if(STCFG.queueOn&&STCFG.queueUrl)items.push(['Queue screen',STCFG.queueUrl]);
+  items.forEach(function(it){
+    if(!it[1])return;
+    var a=document.createElement('a');
+    a.href=it[1];a.target='_blank';a.rel='noopener';
+    a.innerHTML=esc(it[0])+'<span>'+esc(it[1])+'</span>';
+    L.appendChild(a);
+  });
+})();
+
+/* ---- result plumbing ---- */
+function group(name){GROUPS.push({name:name,tests:[]});}
+function add(name,status,detail){
+  var r={group:GROUPS.length?GROUPS[GROUPS.length-1].name:'',name:name,status:status,detail:detail||''};
+  RESULTS.push(r);
+  if(GROUPS.length)GROUPS[GROUPS.length-1].tests.push(r);
+  paint();
+  return r;
+}
+function paint(){
+  var out=document.getElementById('out');
+  out.innerHTML='';
+  GROUPS.forEach(function(g){
+    if(!g.tests.length)return;
+    var c=el('div','card');
+    c.appendChild(el('div','grp-h',g.name));
+    g.tests.forEach(function(t){
+      var row=el('div','t');
+      row.appendChild(el('div','badge '+t.status,t.status));
+      var b=el('div','t-b');
+      b.appendChild(el('div','t-n',t.name));
+      if(t.detail)b.appendChild(el('div','t-d',t.detail));
+      row.appendChild(b);
+      c.appendChild(row);
+    });
+    out.appendChild(c);
+  });
+  var n={PASS:0,FAIL:0,WARN:0,SKIP:0};
+  RESULTS.forEach(function(r){if(n[r.status]!=null)n[r.status]++;});
+  var tl=document.getElementById('tally');tl.innerHTML='';
+  if(n.SKIP||n.WARN){
+    var hint=el('div',null,'');
+    hint.style.cssText='flex-basis:100%;font-weight:400;font-size:12.5px;color:var(--t2);line-height:1.6;margin-top:2px';
+    var parts=[];
+    if(n.SKIP)parts.push(n.SKIP+' test'+(n.SKIP===1?'':'s')+' skipped \u2014 these need the owner email and password above, '
+      +'or the write tests ticked. Skipped is not a failure; it means the check could not be attempted.');
+    if(n.WARN)parts.push(n.WARN+' inconclusive \u2014 read the detail, it says what is missing.');
+    hint.textContent=parts.join('  ');
+    tl.appendChild(hint);
+  }
+  [['PASS',n.PASS,'var(--ok)'],['FAIL',n.FAIL,'var(--bad)'],
+   ['WARN',n.WARN,'var(--warn)'],['SKIP',n.SKIP,'var(--t3)']].forEach(function(p){
+    var s=el('span',null,p[0]+' '+p[1]);s.style.color=p[2];tl.appendChild(s);
+  });
+}
+
+/* ---- HTTP helpers ---- */
+function anonH(){return{'apikey':STCFG.sbKey};}
+function authH(){return{'apikey':STCFG.sbKey,'Authorization':'Bearer '+(TOKEN||STCFG.sbKey),'Content-Type':'application/json'};}
+async function rest(path,opt){
+  opt=opt||{};
+  var r=await fetch(STCFG.sbUrl+'/rest/v1/'+path,
+    {method:opt.method||'GET',headers:opt.headers||authH(),
+     body:opt.body?JSON.stringify(opt.body):undefined,cache:'no-store'});
+  var txt='';try{txt=await r.text();}catch(e){}
+  var json=null;try{json=JSON.parse(txt);}catch(e){}
+  return {ok:r.ok,status:r.status,text:txt,json:json};
+}
+
+/* ==================================================================== */
+async function runAll(){
+  RESULTS=[];GROUPS=[];TOKEN=null;UID=null;
+  var btn=document.getElementById('run');btn.disabled=true;btn.textContent='Running\u2026';
+  try{
+    await testConfig();
+    await testPages();
+    await testAuth();
+    await testSchema();
+    await testSecurity();
+    await testQueue();
+    await testWrites();
+  }catch(e){
+    add('Test run aborted','FAIL',String(e&&e.message||e));
+  }
+  btn.disabled=false;btn.textContent='Run tests again';
+  paint();
+}
+
+/* ---- 1. what was baked in ---- */
+async function testConfig(){
+  group('Configuration');
+  var VENDOR_HOST='btfazallxcbmiitbcmkv.supabase.co';
+  add('Supabase URL present',STCFG.sbUrl?'PASS':'FAIL',STCFG.sbUrl||'empty');
+  add('Not pointing at the vendor project',
+      STCFG.sbUrl.indexOf(VENDOR_HOST)<0?'PASS':'FAIL',
+      STCFG.sbUrl.indexOf(VENDOR_HOST)<0?'':'This build would write into the vendor database. Do not hand it over.');
+  add('Anon key looks complete',
+      (STCFG.sbKey||'').length>=100?'PASS':'FAIL',(STCFG.sbKey||'').length+' characters');
+  add('Business id minted',
+      /^[0-9a-f-]{36}$/i.test(STCFG.bizId||'')?'PASS':'FAIL',STCFG.bizId||'missing');
+  add('Served over HTTPS',
+      location.protocol==='https:'?'PASS':'WARN',
+      location.protocol==='https:'?'':'Opened from '+location.protocol+' \u2014 run this from the GitHub Pages URL for a true result.');
+}
+
+/* ---- 2. the deployed pages, and whether they agree ---- */
+async function testPages(){
+  group('Deployed pages');
+  if(location.protocol==='file:'){
+    add('Page reachability','SKIP','Open this page from the live site to test the deployment.');
+    return;
+  }
+  var base=location.href.replace(/selftest\/.*$/,'');
+  var pages=[['index.html','POS'],['dashboard/index.html','Dashboard'],['version.json','version.json']];
+  if(STCFG.queueOn)pages.push(['queue/index.html','Queue screen']);
+  var bodies={};
+  for(var i=0;i<pages.length;i++){
+    var p=pages[i];
+    try{
+      var r=await fetch(base+p[0],{cache:'no-store'});
+      var t=await r.text();
+      bodies[p[0]]=t;
+      add(p[1]+' is live',r.ok?'PASS':'FAIL',r.ok?(Math.round(t.length/1024)+' KB'):('HTTP '+r.status+' at '+base+p[0]));
+    }catch(e){
+      add(p[1]+' is live','FAIL','Could not fetch '+base+p[0]+' \u2014 '+(e.message||e));
+    }
+  }
+  // version.json must match the build that is actually deployed
+  try{
+    var vj=JSON.parse(bodies['version.json']||'{}');
+    add('version.json matches this build',
+        vj.version===STCFG.ver?'PASS':'FAIL',
+        'version.json says '+(vj.version||'nothing')+', this build is '+STCFG.ver+
+        (vj.version===STCFG.ver?'':'. Clients will be told about the wrong release.'));
+  }catch(e){add('version.json matches this build','FAIL','version.json is not valid JSON');}
+
+  /* The one that matters most: all three pages must carry the same business id
+     and the same project. A mismatch is why a queue screen sits empty forever. */
+  function pick(src,re){var m=re.exec(src||'');return m?m[1]:null;}
+  var posId =pick(bodies['index.html'],/const PREFILL=\{[^]*?"bizId":"([0-9a-f-]{36})"/i);
+  var dashId=pick(bodies['dashboard/index.html'],/const DASH_PREFILL=\{[^]*?"bizId":"([0-9a-f-]{36})"/i);
+  var qId   =STCFG.queueOn?pick(bodies['queue/index.html'],/const QCFG=\{[^]*?"bizId":"([0-9a-f-]{36})"/i):null;
+  var ids=[['POS',posId],['Dashboard',dashId]];
+  if(STCFG.queueOn)ids.push(['Queue',qId]);
+  var missing=ids.filter(function(x){return !x[1];}).map(function(x){return x[0];});
+  if(missing.length){
+    add('All apps share one business id','WARN','Could not read the id from: '+missing.join(', ')+
+        ' \u2014 the page format may have changed.');
+  }else{
+    var same=ids.every(function(x){return x[1]===STCFG.bizId;});
+    add('All apps share one business id',same?'PASS':'FAIL',
+        same?STCFG.bizId
+            :ids.map(function(x){return x[0]+'='+x[1];}).join('  ')+
+             '  \u2014 expected '+STCFG.bizId+'. The queue screen and dashboard will not see the POS data.');
+  }
+  var posUrlHost=pick(bodies['index.html'],/const SUPA_URL='https:\/\/([a-z0-9]+\.supabase\.co)'/);
+  if(posUrlHost){
+    add('POS points at this project',
+        STCFG.sbUrl.indexOf(posUrlHost)>-1?'PASS':'FAIL',
+        STCFG.sbUrl.indexOf(posUrlHost)>-1?posUrlHost:'POS uses '+posUrlHost);
+  }
+}
+
+/* ---- 3. sign in ---- */
+async function testAuth(){
+  group('Owner sign-in');
+  var em=(document.getElementById('em').value||'').trim();
+  var pw=document.getElementById('pw').value||'';
+  if(!em||!pw){add('Owner can sign in','SKIP','Fill in the owner email and password to run the signed-in tests.');return;}
+  try{
+    var r=await fetch(STCFG.sbUrl+'/auth/v1/token?grant_type=password',
+      {method:'POST',headers:{'apikey':STCFG.sbKey,'Content-Type':'application/json'},
+       body:JSON.stringify({email:em,password:pw})});
+    var d=await r.json();
+    if(d && d.access_token){
+      TOKEN=d.access_token; UID=(d.user&&d.user.id)||null;
+      add('Owner can sign in','PASS',em);
+    }else{
+      add('Owner can sign in','FAIL',(d&&(d.error_description||d.msg||d.error))||('HTTP '+r.status));
+    }
+  }catch(e){add('Owner can sign in','FAIL',e.message||String(e));}
+  if(!TOKEN)return;
+  var b=await rest('businesses?id=eq.'+STCFG.bizId);
+  var row=b.json&&b.json[0];
+  add('Business row exists',row?'PASS':'FAIL',row?('"'+row.name+'"'):'No row with id '+STCFG.bizId+' \u2014 was setup.sql run?');
+  if(row){
+    add('Business is claimed by this owner',
+        row.user_id&&row.user_id===UID?'PASS':(row.user_id?'FAIL':'WARN'),
+        row.user_id?(row.user_id===UID?'':'Claimed by a different user id. The POS would create a second business.')
+                   :'Still unclaimed \u2014 normal before the first POS sign-in.');
+  }
+  var mine=await rest('businesses?user_id=eq.'+UID);
+  var cnt=(mine.json&&mine.json.length)||0;
+  add('Exactly one business for this owner',cnt===1?'PASS':(cnt===0?'WARN':'FAIL'),
+      cnt+' found'+(cnt>1?' \u2014 duplicates split the data between the POS and the dashboard.':''));
+}
+
+/* ---- 4. schema ---- */
+async function testSchema(){
+  group('Database schema');
+  if(!TOKEN){add('Tables reachable','SKIP','Needs owner sign-in.');return;}
+  var tables=['businesses','products','sales','expenses','employees','attendance','customers',
+    'credit_ledger','ingredients','recipes','wastage','suppliers','purchase_orders','orders',
+    'employee_loans','leaves','shifts'];
+  var bad=[];
+  for(var i=0;i<tables.length;i++){
+    var r=await rest(tables[i]+'?select=*&limit=1');
+    if(!r.ok)bad.push(tables[i]+' ('+r.status+')');
+  }
+  add('All 17 tables reachable',bad.length?'FAIL':'PASS',
+      bad.length?('Missing or blocked: '+bad.join(', ')+'. Re-run setup.sql.'):'businesses \u2026 shifts');
+  var qcols=await rest('sales?select=queue_no,queue_status,queue_day&limit=1');
+  add('Queue columns on sales',qcols.ok?'PASS':'FAIL',
+      qcols.ok?'queue_no, queue_status, queue_day':qcols.text.slice(0,140));
+  var bq=await rest('businesses?select=queue_public&limit=1');
+  add('queue_public column on businesses',bq.ok?'PASS':'FAIL',bq.ok?'':bq.text.slice(0,140));
+  var bar=await rest('products?select=barcode&limit=1');
+  add('barcode column on products',bar.ok?'PASS':'FAIL',bar.ok?'':bar.text.slice(0,140));
+}
+
+/* ---- 5. security ---- */
+async function testSecurity(){
+  group('Row-level security');
+  /* Anon must not be able to read sales. Careful: PostgREST answers a
+     filtered-out read with 200 and an empty array, which is exactly what an
+     empty table returns too. Reporting PASS on that alone would clear a
+     project with RLS switched off, as long as no sale had been rung up yet.
+     So an empty result is only conclusive once we know rows exist. */
+  var r=await fetch(STCFG.sbUrl+'/rest/v1/sales?select=total&limit=1',{headers:anonH(),cache:'no-store'});
+  var txt='';try{txt=await r.text();}catch(e){}
+  var anonRows=0;
+  try{var pj=JSON.parse(txt);anonRows=Array.isArray(pj)?pj.length:0;}catch(e){}
+  if(r.ok&&anonRows>0){
+    add('Anonymous cannot read sales','FAIL',
+        'Sales are readable without signing in. Re-run setup.sql and check RLS is enabled on every table.');
+  }else if(!r.ok){
+    add('Anonymous cannot read sales','PASS','HTTP '+r.status+' \u2014 the request was refused outright.');
+  }else{
+    // 200 with nothing in it. Does the owner actually see anything?
+    var ownerRows=null;
+    if(TOKEN){
+      var mine=await rest('sales?select=txn_id&limit=1');
+      if(mine.ok&&mine.json&&mine.json.length!==undefined)ownerRows=mine.json.length;
+    }
+    if(ownerRows>0){
+      add('Anonymous cannot read sales','PASS',
+          'The owner can read sales, anonymous gets an empty result \u2014 row-level security is doing its job.');
+    }else{
+      add('Anonymous cannot read sales','WARN',
+          'Inconclusive: there are no sales in this database yet, so an empty anonymous read proves nothing. '
+          +'Tick the write test above, or re-run this after the first real sale.');
+    }
+  }
+  var r2=await fetch(STCFG.sbUrl+'/rest/v1/businesses?select=settings&limit=1',{headers:anonH(),cache:'no-store'});
+  var t2='';try{t2=await r2.text();}catch(e){}
+  var leak2=r2.ok&&t2&&t2.indexOf('"pass"')>-1;
+  var rows2=0;try{var pj2=JSON.parse(t2);rows2=Array.isArray(pj2)?pj2.length:0;}catch(e){}
+  add('Anonymous cannot read business settings',leak2?'FAIL':'PASS',
+      leak2?'The admin password is exposed to anyone holding the anon key.'
+           :(rows2>0?'The row is visible but carries no settings.'
+                    :'Empty result \u2014 the business row is hidden from anonymous readers.'));
+  // anon must be able to read the queue view, and only that
+  if(STCFG.queueOn){
+    var r3=await fetch(STCFG.sbUrl+'/rest/v1/public_queue?biz_id=eq.'+STCFG.bizId,{headers:anonH(),cache:'no-store'});
+    add('Queue screen can read public_queue',r3.ok?'PASS':'FAIL',
+        r3.ok?'The wall display will work without signing in.':'HTTP '+r3.status+' \u2014 the queue screen will stay blank.');
+    var r4=await fetch(STCFG.sbUrl+'/rest/v1/public_queue',
+      {method:'POST',headers:{'apikey':STCFG.sbKey,'Content-Type':'application/json'},
+       body:JSON.stringify({biz_id:STCFG.bizId,queue_no:9999,queue_status:'ready'}),cache:'no-store'});
+    add('Queue screen cannot write',r4.ok?'FAIL':'PASS',
+        r4.ok?'The display could inject queue numbers. Check the grants in setup.sql.':'HTTP '+r4.status+' \u2014 read-only as intended');
+  }else{
+    add('Queue security','SKIP','Queue not enabled for this client.');
+  }
+}
+
+/* ---- 6. queue number function ---- */
+async function testQueue(){
+  group('Queue numbers');
+  if(!STCFG.queueOn){add('next_queue_no','SKIP','Queue not enabled for this client.');return;}
+  if(!TOKEN){add('next_queue_no','SKIP','Needs owner sign-in.');return;}
+  var r=await rest('rpc/next_queue_no',{method:'POST',body:{b:STCFG.bizId}});
+  var n=parseInt(r.text,10);
+  add('next_queue_no exists and returns a number',
+      r.ok&&n>0?'PASS':'FAIL',
+      r.ok?('returned '+n):(r.status+' '+r.text.slice(0,140)+' \u2014 re-run setup.sql'));
+  if(!(r.ok&&n>0))return;
+  /* The real question is what happens when two tills ask at once. Without the
+     advisory lock both get the same number. Ten parallel calls in one
+     transaction each should still come back identical here (nothing has been
+     inserted), so this checks the call survives concurrency rather than
+     returning an error or timing out. */
+  try{
+    var calls=[];for(var i=0;i<10;i++)calls.push(rest('rpc/next_queue_no',{method:'POST',body:{b:STCFG.bizId}}));
+    var res=await Promise.all(calls);
+    var failed=res.filter(function(x){return !x.ok;}).length;
+    add('10 simultaneous requests all succeed',failed?'FAIL':'PASS',
+        failed?(failed+' of 10 failed \u2014 check the advisory lock in setup.sql'):'no errors, no timeouts');
+  }catch(e){add('10 simultaneous requests all succeed','FAIL',e.message||String(e));}
+}
+
+/* ---- 7. write path ---- */
+async function testWrites(){
+  group('Write path');
+  if(!document.getElementById('wr').checked){add('Write tests','SKIP','Not enabled.');return;}
+  if(!TOKEN){add('Write tests','SKIP','Needs owner sign-in.');return;}
+  var txn='SELFTEST-'+Date.now();
+  var today=new Date();
+  var day=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
+  var qno=null;
+  if(STCFG.queueOn){
+    var q=await rest('rpc/next_queue_no',{method:'POST',body:{b:STCFG.bizId}});
+    qno=parseInt(q.text,10)||null;
+  }
+  var payload={biz_id:STCFG.bizId,txn_id:txn,date:today.toISOString(),total:0,method:'Cash',
+    items:[],discount:0,cashier:'SELF-TEST',ref:'',voided:false,receipt:'',customer:'',
+    queue_no:qno,queue_status:qno?'waiting':'',queue_day:qno?day:null};
+  var ins=await rest('sales',{method:'POST',headers:Object.assign({},authH(),{'Prefer':'return=representation'}),body:payload});
+  add('Can record a sale',ins.ok?'PASS':'FAIL',ins.ok?('txn '+txn):(ins.status+' '+ins.text.slice(0,160)));
+  if(!ins.ok)return;
+  var dup=await rest('sales',{method:'POST',body:payload});
+  add('Duplicate txn_id is rejected',
+      (!dup.ok)?'PASS':'FAIL',
+      dup.ok?'The same sale could be saved twice when the offline queue retries.':'HTTP '+dup.status+' as intended');
+  if(qno){
+    var pq=await fetch(STCFG.sbUrl+'/rest/v1/public_queue?biz_id=eq.'+STCFG.bizId+'&queue_no=eq.'+qno,
+      {headers:anonH(),cache:'no-store'});
+    var rows=[];try{rows=await pq.json();}catch(e){}
+    add('New number appears on the queue view',
+        (rows&&rows.length)?'PASS':'FAIL',
+        (rows&&rows.length)?('number '+(STCFG.prefix?STCFG.prefix+'-':'')+qno+' is visible to the wall display')
+          :'The sale was saved but the display cannot see it. Check queue_public on the business row.');
+    var upd=await rest('sales?txn_id=eq.'+encodeURIComponent(txn)+'&biz_id=eq.'+STCFG.bizId,
+      {method:'PATCH',headers:Object.assign({},authH(),{'Prefer':'return=representation'}),body:{queue_status:'ready'}});
+    add('Marking Ready reaches the database',upd.ok?'PASS':'FAIL',upd.ok?'queue_status = ready':(upd.status+' '+upd.text.slice(0,140)));
+  }
+  /* With a row that definitely exists, the anonymous read becomes conclusive. */
+  var probe=await fetch(STCFG.sbUrl+'/rest/v1/sales?select=total&txn_id=eq.'+encodeURIComponent(txn),
+    {headers:anonH(),cache:'no-store'});
+  var ptxt='';try{ptxt=await probe.text();}catch(e){}
+  var prows=0;try{var pp=JSON.parse(ptxt);prows=Array.isArray(pp)?pp.length:0;}catch(e){}
+  add('Anonymous still cannot see that sale',(probe.ok&&prows>0)?'FAIL':'PASS',
+      (probe.ok&&prows>0)
+        ?'A sale that exists is readable without signing in \u2014 row-level security is not protecting this table.'
+        :'The row exists and the owner can read it, yet anonymous gets nothing back. This is the conclusive RLS check.');
+  var del=await rest('sales?txn_id=eq.'+encodeURIComponent(txn),{method:'DELETE'});
+  add('Test sale cleaned up',del.ok?'PASS':'WARN',
+      del.ok?('deleted '+txn):('Could not delete '+txn+' \u2014 remove it by hand in Supabase.'));
+}
+
+/* ---- report ---- */
+document.getElementById('run').onclick=runAll;
+document.getElementById('copy').onclick=function(){
+  var lines=['ARROYO POS \u2014 DEPLOYMENT SELF-TEST',
+    'Business: '+(STCFG.bizName||''),'Business id: '+(STCFG.bizId||''),
+    'Template: '+(STCFG.ver||''),'Run: '+new Date().toLocaleString(),
+    'POS: '+(STCFG.posUrl||''),'Dashboard: '+(STCFG.dashUrl||''),
+    (STCFG.queueOn?'Queue: '+(STCFG.queueUrl||''):'Queue: not enabled'),
+    '======================================'];
+  var g='';
+  RESULTS.forEach(function(r){
+    if(r.group!==g){g=r.group;lines.push('','-- '+g.toUpperCase()+' --');}
+    lines.push('['+r.status+'] '+r.name+(r.detail?'  \u2014 '+r.detail:''));
+  });
+  var n={PASS:0,FAIL:0,WARN:0,SKIP:0};
+  RESULTS.forEach(function(r){if(n[r.status]!=null)n[r.status]++;});
+  lines.push('','PASS '+n.PASS+'  FAIL '+n.FAIL+'  WARN '+n.WARN+'  SKIP '+n.SKIP);
+  var txt=lines.join('\n');
+  var b=this;
+  function done(ok){b.textContent=ok?'Copied':'Copy failed';setTimeout(function(){b.textContent='Copy report';},2000);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){done(true);}).catch(function(){done(false);});
+  }else{
+    var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.top='-9999px';
+    document.body.appendChild(ta);ta.select();var ok=false;try{ok=document.execCommand('copy');}catch(e){}
+    document.body.removeChild(ta);done(ok);
+  }
+};
+</script>
+</body>
+</html>
