@@ -51,6 +51,9 @@ input,select,textarea{user-select:text;-webkit-user-select:text}
 .install-btn{display:none;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;border:1.5px solid var(--b2);background:var(--bg2);color:var(--t1);font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:0.3px}
 .install-btn:active{background:var(--bg3)}
 .install-btn.visible{display:flex}
+.fs-btn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1.5px solid var(--b2);background:var(--bg2);color:var(--t1);font-size:13px;cursor:pointer;flex-shrink:0;padding:0;line-height:1}
+.fs-btn:active{background:var(--bg3)}
+:fullscreen .fs-btn,:-webkit-full-screen .fs-btn{border-color:var(--ac);background:var(--ac2);color:var(--ac)}
 .topnav-tabs{display:flex;overflow-x:auto;padding:0 4px}
 .topnav-tabs::-webkit-scrollbar{height:0}
 .tab{flex:1;min-width:60px;padding:10px 8px;font-size:11px;font-weight:700;color:var(--t3);border:none;background:none;cursor:pointer;border-bottom:2.5px solid transparent;text-align:center;letter-spacing:0.3px;white-space:nowrap}
@@ -4312,6 +4315,33 @@ function renderTopNav(app){
     };
     brand.appendChild(cb);
   }
+  // Fullscreen button
+  if(document.fullscreenEnabled||document.webkitFullscreenEnabled){
+    const fsBtn=document.createElement('button');
+    fsBtn.className='fs-btn';
+    fsBtn.title='Toggle fullscreen';
+    function fsIcon(){return (document.fullscreenElement||document.webkitFullscreenElement)?'⛶':'⛶';}
+    fsBtn.textContent='⛶';
+    fsBtn.onclick=function(){
+      if(document.fullscreenElement||document.webkitFullscreenElement){
+        (document.exitFullscreen||document.webkitExitFullscreen).call(document);
+      } else {
+        const el=document.documentElement;
+        const req=el.requestFullscreen||el.webkitRequestFullscreen;
+        if(req) req.call(el,{navigationUI:'hide'});
+      }
+    };
+    // Update icon on fullscreen change
+    function onFsChange(){
+      const inFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+      fsBtn.textContent=inFs?'✕':'⛶';
+      fsBtn.title=inFs?'Exit fullscreen':'Enter fullscreen';
+    }
+    document.addEventListener('fullscreenchange',onFsChange);
+    document.addEventListener('webkitfullscreenchange',onFsChange);
+    brand.appendChild(fsBtn);
+  }
+
   // PWA Install button — always visible unless already running as installed PWA
   if(!window._pwaInstalled){
     const instBtn=document.createElement('button');
