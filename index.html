@@ -77,13 +77,15 @@ input,select,textarea{user-select:text;-webkit-user-select:text}
 .pos-cats::-webkit-scrollbar{height:0}
 .cat{padding:8px 16px;border-radius:20px;border:1.5px solid var(--b2);background:var(--bg2);color:var(--t2);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
 .cat.on{background:var(--ac);color:#fff;border-color:var(--ac)}
-.prod-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 10px 100px;overflow-y:auto;flex:1;align-content:start}
-.pcard{background:var(--bg2);border:1.5px solid var(--b1);border-radius:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;position:relative;overflow:hidden}.pcard::before{content:'';display:block;padding-top:100%}.pcard-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px}
+.prod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:8px 10px 100px;overflow-y:auto;flex:1;align-content:start}
+.pcard{background:var(--bg2);border:1.5px solid var(--b1);border-radius:14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;text-align:center;position:relative;overflow:hidden;min-height:110px}
+.pcard::before{display:none}
+.pcard-inner{position:static;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:14px 10px;width:100%}
 .pcard:active{background:var(--bg3);transform:scale(0.94)}
-.pico{font-size:10px;font-weight:800;color:var(--t2);background:var(--bg3);padding:5px 8px;border-radius:6px;letter-spacing:0.5px}
-.pname{font-size:11px;font-weight:600;line-height:1.2}
-.pprice{font-size:12px;font-weight:700;color:var(--ac)}
-.pstock{font-size:9px;color:var(--t3)}
+.pico{font-size:11px;font-weight:800;color:var(--t2);background:var(--bg3);padding:5px 10px;border-radius:6px;letter-spacing:0.5px}
+.pname{font-size:13px;font-weight:700;line-height:1.3;word-break:break-word}
+.pprice{font-size:14px;font-weight:800;color:var(--ac)}
+.pstock{font-size:10px;color:var(--t3)}
 .pcard.low .pstock{color:var(--wt)}
 .pcard.out{opacity:0.3;pointer-events:none}
 
@@ -1437,14 +1439,15 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 <script>
 /* PWA install prompt capture — must run as early as possible */
 window._pwaInstallPrompt = null;
+window._pwaInstalled = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 window.addEventListener('beforeinstallprompt', function(e) {
   e.preventDefault();
   window._pwaInstallPrompt = e;
-  // Show any install button already in the DOM
   document.querySelectorAll('.install-btn').forEach(function(btn){ btn.classList.add('visible'); });
 });
 window.addEventListener('appinstalled', function() {
   window._pwaInstallPrompt = null;
+  window._pwaInstalled = true;
   document.querySelectorAll('.install-btn').forEach(function(btn){ btn.classList.remove('visible'); });
 });
 </script>
@@ -4309,22 +4312,33 @@ function renderTopNav(app){
     };
     brand.appendChild(cb);
   }
-  // PWA Install button
-  const instBtn=document.createElement('button');
-  instBtn.className='install-btn'+(window._pwaInstallPrompt?' visible':'');
-  instBtn.title='Install app';
-  instBtn.innerHTML='&#8659; Install';
-  instBtn.onclick=function(){
-    if(!window._pwaInstallPrompt)return;
-    window._pwaInstallPrompt.prompt();
-    window._pwaInstallPrompt.userChoice.then(function(result){
-      if(result.outcome==='accepted'){
-        window._pwaInstallPrompt=null;
-        instBtn.classList.remove('visible');
+  // PWA Install button — always visible unless already running as installed PWA
+  if(!window._pwaInstalled){
+    const instBtn=document.createElement('button');
+    instBtn.className='install-btn visible';
+    instBtn.title='Install app to your device';
+    instBtn.innerHTML='&#8659;&nbsp;Install';
+    instBtn.onclick=function(){
+      if(window._pwaInstallPrompt){
+        window._pwaInstallPrompt.prompt();
+        window._pwaInstallPrompt.userChoice.then(function(result){
+          if(result.outcome==='accepted'){
+            window._pwaInstallPrompt=null;
+            instBtn.classList.remove('visible');
+          }
+        });
+      } else {
+        // iOS / unsupported browser — show manual instructions
+        const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);
+        if(isIOS){
+          uiAlert('To install on iOS:\n1. Tap the Share button (box with arrow) in Safari\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add"',{title:'Install on iPhone / iPad',tone:'info'});
+        } else {
+          uiAlert('To install:\nOpen this page in Chrome or Edge, then tap the menu (⋮) and select "Install app" or "Add to Home Screen".',{title:'Install App',tone:'info'});
+        }
       }
-    });
-  };
-  brand.appendChild(instBtn);
+    };
+    brand.appendChild(instBtn);
+  }
 
   nav.appendChild(brand);
 
