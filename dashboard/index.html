@@ -1618,7 +1618,13 @@ function renderShifts(main){
      cashier whose shorts and overs cancel out on paper. */
   sg.appendChild(statCard('Net variance',fmt(netVar),'across counted shifts',Math.abs(netVar)<0.005?'green':(netVar<0?'red':'amber')));
   sg.appendChild(statCard('Total discrepancy',fmt(absVar),'shorts + overs',absVar>0?'amber':'green'));
+  const declared=all.filter(function(x){return x.declared_sales!==null&&x.declared_sales!==undefined;});
+  const salesGaps=declared.filter(function(x){return Math.abs(+x.sales_variance||0)>0.005;});
   sg.appendChild(statCard('Never counted',uncounted.length,'no cash count',uncounted.length?'red':'green'));
+  if(declared.length){
+    sg.appendChild(statCard('Sales figure off',salesGaps.length,'of '+declared.length+' declared',
+      salesGaps.length?'amber':'green'));
+  }
   main.appendChild(sg);
 
   if(uncounted.length){
@@ -1685,7 +1691,22 @@ function renderShifts(main){
   const tbl2=el('table','tbl','<thead><tr><th>Cashier</th><th>Started</th><th>Ended</th>'
     +'<th style="text-align:right">Float</th><th style="text-align:right">Cash sales</th>'
     +'<th style="text-align:right">Paid out</th><th style="text-align:right">Expected</th>'
-    +'<th style="text-align:right">Counted</th><th style="text-align:right">Short / Over</th></tr></thead>');
+    +'<th style="text-align:right">Counted</th><th style="text-align:right">Short / Over</th>'
+    +'<th style="text-align:right">Sales declared</th></tr></thead>');
+  /* What the cashier said was sold, against what the till recorded. Shifts
+     closed on a build before this field existed simply show a dash. */
+  function declCell(x){
+    if(x.declared_sales===null||x.declared_sales===undefined)
+      return '<span style="color:var(--t3)">—</span>';
+    const sv=+x.sales_variance||0;
+    const col=Math.abs(sv)<0.005?'var(--st)':(sv<0?'var(--dt)':'var(--wt)');
+    let sub='matches';
+    if(sv<-0.005)sub='short '+fmt(Math.abs(sv));
+    else if(sv>0.005)sub='over '+fmt(sv);
+    return '<div style="font-weight:700">'+fmt(x.declared_sales)+'</div>'
+      +'<div style="font-size:11px;color:'+col+'">'+sub+'</div>';
+  }
+
   const tb2=document.createElement('tbody');
   all.slice(0,150).forEach(function(x){
     const notCounted=x.counted_cash===null||x.counted_cash===undefined;
@@ -1704,14 +1725,15 @@ function renderShifts(main){
       +'<td style="text-align:right">'+fmt(x.paid_out)+'</td>'
       +'<td style="text-align:right">'+fmt(x.expected_cash)+'</td>'
       +'<td style="text-align:right">'+(notCounted?'—':fmt(x.counted_cash))+'</td>'
-      +'<td style="text-align:right"><span class="badge '+badge+'">'+vtxt+'</span></td>';
+      +'<td style="text-align:right"><span class="badge '+badge+'">'+vtxt+'</span></td>'
+      +'<td style="text-align:right">'+declCell(x)+'</td>';
     tb2.appendChild(tr);
   });
   tbl2.appendChild(tb2);c.appendChild(tbl2);main.appendChild(c);
 }
 
 function exportShiftsCSV(rows){
-  const head=['Cashier','Started','Ended','Opening float','Cash sales','Paid out','Expected cash','Counted cash','Variance','Note'];
+  const head=['Cashier','Started','Ended','Opening float','Cash sales','Paid out','Expected cash','Counted cash','Variance','Total sales (till)','Sales declared','Sales variance','Note'];
   // Quotes doubled and every field wrapped, so a note containing a comma
   // cannot shift the remaining columns along by one.
   const q=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"';};
@@ -1721,7 +1743,11 @@ function exportShiftsCSV(rows){
       (+x.opening_float||0).toFixed(2),(+x.cash_sales||0).toFixed(2),
       (+x.paid_out||0).toFixed(2),(+x.expected_cash||0).toFixed(2),
       (x.counted_cash===null||x.counted_cash===undefined)?'NOT COUNTED':(+x.counted_cash).toFixed(2),
-      (+x.variance||0).toFixed(2),x.note||''].map(q).join(','));
+      (+x.variance||0).toFixed(2),
+      (+x.total_sales||0).toFixed(2),
+      (x.declared_sales===null||x.declared_sales===undefined)?'NOT DECLARED':(+x.declared_sales).toFixed(2),
+      (x.sales_variance===null||x.sales_variance===undefined)?'':(+x.sales_variance).toFixed(2),
+      x.note||''].map(q).join(','));
   });
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
