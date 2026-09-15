@@ -348,6 +348,15 @@ input,select,textarea{user-select:text;-webkit-user-select:text}
 .cloud-banner.saving span{color:var(--t2)}
 .cloud-banner-close{font-size:18px;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;color:inherit}
 .cashier-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;background:var(--bg3);color:var(--t3);cursor:pointer;white-space:nowrap;flex-shrink:0}
+/* Full-screen toggle. Sized to the 44px tap target the rest of the till uses,
+   but visually quiet — it is pressed once at opening time and then ignored. */
+.fs-btn{width:34px;height:34px;min-width:34px;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--b2);background:var(--bg2);color:var(--t2);border-radius:0;cursor:pointer;
+  flex-shrink:0;padding:0;line-height:1}
+.fs-btn:active{background:var(--bg3)}
+.fs-btn svg{width:17px;height:17px;display:block;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:square}
+.fs-btn.on{background:var(--t1);color:var(--bg0);border-color:var(--t1)}
 
 /* Goal bar */
 .goal-bar{padding:0 12px 8px;flex-shrink:0}
@@ -569,7 +578,21 @@ input,select,textarea{user-select:text;-webkit-user-select:text}
   grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)) !important;
   gap: 0;
   padding: 0 14px 108px;
+  /* Rows hold their intrinsic height and the grid scrolls. Left on `auto`
+     they were squeezed to fit the flex container once the catalogue outgrew
+     one screen, which is what flattened every tile in the All tab down to
+     its icon badge while a short category looked fine. */
+  grid-auto-rows: max-content;
 }
+
+/* The spacer that gives a tile its aspect ratio is a flex item, so it
+   inherited flex-shrink:1 and collapsed along with the row. It is scenery,
+   not something to be negotiated with. */
+.pcard::before { flex: 0 0 auto; }
+
+/* Last line of defence: even if the spacer is ignored entirely, a tile still
+   has room for its name, price and stock line. */
+.pcard { min-height: 132px; }
 
 @media (min-width: 480px) {
   .prod-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)) !important; }
@@ -1382,6 +1405,9 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
   }
   /* Wider than tall, so two columns still show plenty of rows. */
   .pcard::before{padding-top:82%}
+  /* See the note by .prod-grid below — the phone breakpoint needs its own
+     floor because the tiles are wider than tall here. */
+  .pcard{min-height:124px}
   .pcard-inner{padding:10px 10px 11px;gap:4px}
   .pico{font-size:9.5px;padding:3px 6px}
   .pname{font-size:13px;line-height:1.3}
@@ -1434,7 +1460,7 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 <script>
 const CUR='PHP ',TAX=0.12;
 const CREATOR_PASS='Admin2026';
-const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.5.1'};
+const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.5.2'};
 const GITHUB_PAGES_URL='https://pickbrew25.github.io/Pick-Brew';
 const VERSION_URL=GITHUB_PAGES_URL+'/version.json';
 const UPDATE_URL=GITHUB_PAGES_URL+'/index.html';
@@ -4346,6 +4372,19 @@ function renderTopNav(app){
   const ndot=document.createElement('div');ndot.id='netDot';ndot.className='net-dot '+(navigator.onLine?'online':'offline');
   const nlbl=document.createElement('span');nlbl.id='netLbl';nlbl.textContent=navigator.onLine?'':'OFFLINE';
   nsw.appendChild(ndot);nsw.appendChild(nlbl);brand.appendChild(nsw);
+
+  /* Full screen. Deliberately a plain toggle: no confirmation, no "are you
+     sure", no toast on the way in. Anything that puts a box on screen at the
+     moment of entering is the one thing guaranteed to bounce a phone browser
+     straight back out. */
+  const fsb=document.createElement('button');
+  fsb.className='fs-btn'+(isFullscreen()?' on':'');
+  fsb.id='fsBtn';
+  fsb.title=isFullscreen()?'Leave full screen':'Full screen';
+  fsb.setAttribute('aria-label',fsb.title);
+  fsb.innerHTML=fsIcon(isFullscreen());
+  fsb.onclick=function(e){e.preventDefault();e.stopPropagation();toggleFullscreen();};
+  brand.appendChild(fsb);
 
   if(S.activeCashier){
     const cb=document.createElement('span');cb.className='cashier-badge';cb.textContent=S.activeCashier.name;
@@ -7947,6 +7986,100 @@ load();render();
     render();
   }
 })();
+/* ── FULL SCREEN ──────────────────────────────────────────────────────
+ * A till is a dedicated device. The browser's URL bar, tab strip and the
+ * phone's status bar are three rows of nothing useful, and on a 5-inch
+ * screen that is a whole row of products.
+ *
+ * The rule here is that nothing the app does may knock the till out of full
+ * screen. Two things can:
+ *   - a native dialog. alert() is already replaced with a DOM box further up,
+ *     and confirm()/prompt() call sites go through uiConfirm/uiPrompt, so
+ *     every message the till shows is an element inside the page. Toasts are
+ *     too. None of them touch the fullscreen element.
+ *   - the screen locking. Coming back from a locked screen drops full screen
+ *     on most Android browsers, so a Screen Wake Lock is held for as long as
+ *     full screen is on, and re-taken when the tab becomes visible again
+ *     (the lock is released by the browser whenever the tab is hidden).
+ *
+ * Entering full screen has to happen inside the click itself — no awaits
+ * before the request, or the browser stops treating it as a user gesture.
+ * ==================================================================== */
+let _wakeLock=null;
+
+function isFullscreen(){
+  return !!(document.fullscreenElement||document.webkitFullscreenElement);
+}
+
+function fsIcon(on){
+  return on
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>';
+}
+
+async function takeWakeLock(){
+  try{
+    if(!('wakeLock' in navigator))return;
+    if(_wakeLock&&!_wakeLock.released)return;
+    _wakeLock=await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release',function(){});
+  }catch(e){/* refused or unsupported — full screen still works */}
+}
+
+function dropWakeLock(){
+  try{if(_wakeLock&&!_wakeLock.released)_wakeLock.release();}catch(e){}
+  _wakeLock=null;
+}
+
+function toggleFullscreen(){
+  const el=document.documentElement;
+  if(isFullscreen()){
+    try{
+      if(document.exitFullscreen)document.exitFullscreen();
+      else if(document.webkitExitFullscreen)document.webkitExitFullscreen();
+    }catch(e){}
+    dropWakeLock();
+    return;
+  }
+  /* Request first, synchronously, then everything else. */
+  let p=null;
+  try{
+    if(el.requestFullscreen)p=el.requestFullscreen({navigationUI:'hide'});
+    else if(el.webkitRequestFullscreen)p=el.webkitRequestFullscreen();
+    else{toast('This browser cannot go full screen');return;}
+  }catch(e){toast('Could not go full screen');return;}
+  takeWakeLock();
+  if(p&&p.catch)p.catch(function(){toast('Could not go full screen');});
+}
+
+/* The button is rebuilt on every render, so its state is read from the
+   document rather than kept in S — and the browser's own Esc / back-gesture
+   exit stays in sync without the app having to hear about it. */
+function paintFsBtn(){
+  const b=document.getElementById('fsBtn');
+  if(!b)return;
+  const on=isFullscreen();
+  b.className='fs-btn'+(on?' on':'');
+  b.title=on?'Leave full screen':'Full screen';
+  b.setAttribute('aria-label',b.title);
+  b.innerHTML=fsIcon(on);
+}
+
+document.addEventListener('fullscreenchange',function(){
+  paintFsBtn();
+  if(isFullscreen())takeWakeLock();else dropWakeLock();
+});
+document.addEventListener('webkitfullscreenchange',function(){
+  paintFsBtn();
+  if(isFullscreen())takeWakeLock();else dropWakeLock();
+});
+
+/* A wake lock is dropped by the browser every time the tab is hidden, so it
+   has to be re-taken on the way back rather than assumed to still be held. */
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible'&&isFullscreen())takeWakeLock();
+});
+
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
 </script>
 <style>
