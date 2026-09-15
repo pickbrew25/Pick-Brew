@@ -1460,7 +1460,7 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 <script>
 const CUR='PHP ',TAX=0.12;
 const CREATOR_PASS='Admin2026';
-const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.6.1'};
+const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.6.2'};
 const GITHUB_PAGES_URL='https://pickbrew25.github.io/Pick-Brew';
 const VERSION_URL=GITHUB_PAGES_URL+'/version.json';
 const UPDATE_URL=GITHUB_PAGES_URL+'/index.html';
@@ -2387,8 +2387,36 @@ async function loadCloudData(silent){
      created recipe would keep losing to it. */
   await retryPrepSync();
 }
+/* Last reason a product push was rejected, so the till can say what happened
+   rather than leaving it in a console nobody has open. */
+let _prodSyncErr='';
+function prodSyncError(){return _prodSyncErr;}
+
+/* The next safe local_id. S.prods.length+1 collides with anything already
+   holding that number after a deletion, and the Dashboard mints ids from its
+   own view — so the cloud is asked too whenever it is reachable. */
+async function nextLocalId(){
+  let mx=(S.prods||[]).reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0);
+  if(CLOUD.token&&CLOUD.bizId&&navigator.onLine){
+    try{
+      const r=await fetch(SUPA_URL+'/rest/v1/products?biz_id=eq.'+CLOUD.bizId
+        +'&select=local_id&order=local_id.desc&limit=1',{headers:cloudHeaders()});
+      if(r.ok){
+        const rows=await r.json();
+        if(Array.isArray(rows)&&rows[0]&&rows[0].local_id!=null){
+          mx=Math.max(mx,parseInt(rows[0].local_id)||0);
+        }
+      }
+    }catch(e){/* offline: local max is the best available answer */}
+  }
+  const next=Math.max(mx+1,parseInt(S.nid)||1);
+  S.nid=next+1;
+  return next;
+}
+
 async function saveProductsToCloud(){
-  if(!CLOUD.token||!CLOUD.bizId)return false;
+  _prodSyncErr='';
+  if(!CLOUD.token||!CLOUD.bizId){_prodSyncErr='not signed in to cloud';return false;}
   // Safety: never wipe cloud products if local is empty — pull instead
   if(S.prods.length===0){
     await loadCloudData(true);
@@ -2396,7 +2424,7 @@ async function saveProductsToCloud(){
   }
   // Always ensure auth before writing — handles expired JWT and refresh token, shows re-auth if needed
   const authOk=await ensureAuth();
-  if(!authOk){console.error('saveProductsToCloud: auth failed — aborting');return false;}
+  if(!authOk){_prodSyncErr='sign-in expired';console.error('saveProductsToCloud: auth failed — aborting');return false;}
   try{
     let ch=cloudHeaders();
     // --- SMART MERGE (replaces wipe+repost) ---
@@ -2423,6 +2451,7 @@ async function saveProductsToCloud(){
        Dashboard added and this device has not pulled yet. Report the failure
        and let the next sync try again — the local copy is untouched. */
     if(cloudProds===null){
+      _prodSyncErr='could not read the cloud product list';
       console.error('saveProductsToCloud: could not read cloud products — aborting rather than overwriting');
       return false;
     }
@@ -2466,9 +2495,16 @@ async function saveProductsToCloud(){
       }catch(e){pFail++;lastErr=(e&&e.message)||'network error';console.warn('[Arroyo] saveProductsToCloud: upsert failed for local_id',p.id,e);}
     }
     console.log('[Arroyo] saveProductsToCloud: smart merge complete. local='+S.prods.length+' cloud_before='+cloudProds.length+' failed='+pFail);
-    if(pFail>0){console.error('saveProductsToCloud: '+pFail+' product(s) rejected. Last error: '+lastErr);return false;}
+    if(pFail>0){
+      _prodSyncErr=pFail+' product(s) rejected — '+(lastErr||'no reason given');
+      console.error('saveProductsToCloud: '+pFail+' product(s) rejected. Last error: '+lastErr);
+      return false;
+    }
     return true;
-  }catch(e){console.error('saveProductsToCloud error:',e);return false;}
+  }catch(e){
+    _prodSyncErr=(e&&e.message)||'network error';
+    console.error('saveProductsToCloud error:',e);return false;
+  }
 }
 async function saveSettingsToCloud(){
   if(!CLOUD.token||!CLOUD.bizId)return false;
@@ -2925,7 +2961,9 @@ function applyPrefill(){
     S.prods=JSON.parse(JSON.stringify(_seed));
     const cs=[...new Set(S.prods.map(function(p){return p.cat;}))];
     S.cats=['All'].concat(cs);
-    S.nid=S.prods.length+1;
+    /* length+1 is only right for a list nothing has ever been removed from.
+       Take the highest id that actually exists. */
+    S.nid=S.prods.reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0)+1;
   }
   S.wizardDone=true;
   S.screen='pos';
@@ -3291,7 +3329,7 @@ function initBiz(id){
   S.biz=id;S.bizName=b.label;
   S.prods=JSON.parse(JSON.stringify(DP[id]||[]));
   const cs=[...new Set(S.prods.map(p=>p.cat))];
-  S.cats=['All',...cs];S.nid=S.prods.length+1;S.screen='pos';
+  S.cats=['All',...cs];S.nid=S.prods.reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0)+1;S.screen='pos';
   save();render();
 }
 
@@ -3845,7 +3883,7 @@ function renderWizard(app){
       const selProds=allProds.filter(function(p){return WIZ.selectedProds.includes(p.id);});
       S.prods=JSON.parse(JSON.stringify(selProds));
       const cs=[...new Set(S.prods.map(function(p){return p.cat;}))];
-      S.cats=['All',...cs];S.nid=S.prods.length+1;
+      S.cats=['All',...cs];S.nid=S.prods.reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0)+1;
       // Sync biz to cloud if connected
       if(CLOUD.token&&CLOUD.user){
         try{
@@ -6141,7 +6179,7 @@ function renderAdmin(scr){
   const dr1=document.createElement('div');dr1.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px';
   dr1.innerHTML='<span style="font-size:13px;color:var(--t2)">Reset products to defaults.</span>';
   const resetBtn=document.createElement('button');resetBtn.className='abtn';resetBtn.textContent='Reset';
-  resetBtn.onclick=function(){uiConfirm('Reset products?',function(__ok){if(!__ok)return;S.prods=JSON.parse(JSON.stringify((typeof PREFILL!=='undefined'&&PREFILL.starterProducts&&PREFILL.starterProducts.length)?PREFILL.starterProducts:(DP[S.biz]||[])));const cs=[...new Set(S.prods.map(p=>p.cat))];S.cats=['All',...cs];S.nid=S.prods.length+1;save();render();toast('Reset!');},{tone:'dang'});};
+  resetBtn.onclick=function(){uiConfirm('Reset products?',function(__ok){if(!__ok)return;S.prods=JSON.parse(JSON.stringify((typeof PREFILL!=='undefined'&&PREFILL.starterProducts&&PREFILL.starterProducts.length)?PREFILL.starterProducts:(DP[S.biz]||[])));const cs=[...new Set(S.prods.map(p=>p.cat))];S.cats=['All',...cs];S.nid=S.prods.reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0)+1;save();render();toast('Reset!');},{tone:'dang'});};
   dr1.appendChild(resetBtn);sec6.appendChild(dr1);
   const dr2=document.createElement('div');dr2.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px';
   dr2.innerHTML='<span style="font-size:13px;color:var(--t2)">Wipe all data.</span>';
@@ -7618,7 +7656,7 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     confirm.onclick=function(){
       const nb=sel.value;if(nb===S.biz){toast('Already set');closeModal();return;}
       S.biz=nb;S.bizName=BT.find(x=>x.id===nb).label;S.prods=JSON.parse(JSON.stringify(DP[nb]||[]));
-      const cs=[...new Set(S.prods.map(p=>p.cat))];S.cats=['All',...cs];S.nid=S.prods.length+1;
+      const cs=[...new Set(S.prods.map(p=>p.cat))];S.cats=['All',...cs];S.nid=S.prods.reduce(function(a,p){return Math.max(a,parseInt(p.id)||0);},0)+1;
       save();closeModal();render();toast('Business type changed');
     };
     btns.appendChild(cancel);btns.appendChild(confirm);body.appendChild(btns);
@@ -7745,10 +7783,10 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     body.appendChild(grid);
 
     const btns=document.createElement('div');btns.className='mbtns';
-    if(!isNew){const del=document.createElement('button');del.className='mdel';del.textContent='Delete';del.onclick=function(){S.prods=S.prods.filter(x=>x.id!==p.id);S.cart=S.cart.filter(x=>x.id!==p.id);const cs=[...new Set(S.prods.map(x=>x.cat))];S.cats=['All',...cs];save();saveProductsToCloud();closeModal();toast('Deleted');};btns.appendChild(del);}
+    if(!isNew){const del=document.createElement('button');del.className='mdel';del.textContent='Delete';del.onclick=async function(){S.prods=S.prods.filter(x=>x.id!==p.id);S.cart=S.cart.filter(x=>x.id!==p.id);const cs=[...new Set(S.prods.map(x=>x.cat))];S.cats=['All',...cs];save();closeModal();const ok=await saveProductsToCloud();toast(ok?'Deleted':'Deleted here only — '+prodSyncError());render();};btns.appendChild(del);}
     const cancel=document.createElement('button');cancel.textContent='Cancel';cancel.onclick=closeModal;
     const save2=document.createElement('button');save2.className='mpri';save2.textContent='Save';
-    save2.onclick=function(){
+    save2.onclick=async function(){
       const name=document.getElementById('pNm').value.trim();
       const price=parseFloat(document.getElementById('pPr').value)||0;
       const sv=document.getElementById('pSt').value.trim();const stock=sv===''?999:parseInt(sv)||0;
@@ -7757,12 +7795,26 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
       const salePct=parseInt(document.getElementById('pSalePct').value)||0;
       const cleanVariants=variants.filter(v=>(v.label||'').trim());
       const barcode=(document.getElementById('pBc')||{}).value?document.getElementById('pBc').value.trim():'';
-      if(p){const idx=S.prods.findIndex(x=>x.id===p.id);if(idx>-1)S.prods[idx]={id:p.id,name,price,cat,icon,stock,variants:cleanVariants,img:pendingImg,salePct,barcode};}
-      else S.prods.push({id:S.nid++,name,price,cat,icon,stock,variants:cleanVariants,img:pendingImg,salePct,barcode});
+      save2.disabled=true;save2.textContent='Saving…';
+      let newId=null;
+      if(p){
+        const idx=S.prods.findIndex(x=>x.id===p.id);
+        if(idx>-1)S.prods[idx]={id:p.id,name,price,cat,icon,stock,variants:cleanVariants,img:pendingImg,salePct,barcode};
+      } else {
+        newId=await nextLocalId();
+        S.prods.push({id:newId,name,price,cat,icon,stock,variants:cleanVariants,img:pendingImg,salePct,barcode});
+      }
       const cs=[...new Set(S.prods.map(x=>x.cat))];S.cats=['All',...cs];
-      const savedP=S.prods.find(function(x){return x.id===(p?p.id:S.nid-1);});
+      const savedP=S.prods.find(function(x){return x.id===(p?p.id:newId);});
       if(savedP&&savedP.variants&&savedP.variants.length)syncParentStock(savedP);
-      save();saveProductsToCloud();closeModal();toast(p?'Updated':'Added');
+      save();closeModal();
+      /* Awaited, and the result actually read. This used to fire and forget,
+         so a rejected write still said "Added" and the item sat on the device
+         looking perfectly normal. */
+      const ok=await saveProductsToCloud();
+      if(ok)toast(p?'Updated':'Added');
+      else toast((p?'Updated':'Added')+' on this device only — '+prodSyncError());
+      render();
     };
     btns.appendChild(cancel);btns.appendChild(save2);body.appendChild(btns);
 
@@ -7772,7 +7824,7 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     const btns=document.createElement('div');btns.className='mbtns';
     const cancel=document.createElement('button');cancel.textContent='Cancel';cancel.onclick=closeModal;
     const del=document.createElement('button');del.className='mpri';del.style.background='var(--df)';del.textContent='Delete';
-    del.onclick=function(){S.prods=S.prods.filter(x=>x.id!==m.pid);S.cart=S.cart.filter(x=>x.id!==m.pid);const cs=[...new Set(S.prods.map(x=>x.cat))];S.cats=['All',...cs];save();saveProductsToCloud();closeModal();toast('Deleted');};
+    del.onclick=async function(){S.prods=S.prods.filter(x=>x.id!==m.pid);S.cart=S.cart.filter(x=>x.id!==m.pid);const cs=[...new Set(S.prods.map(x=>x.cat))];S.cats=['All',...cs];save();closeModal();const ok=await saveProductsToCloud();toast(ok?'Deleted':'Deleted here only — '+prodSyncError());render();};
     btns.appendChild(cancel);btns.appendChild(del);body.appendChild(btns);
   } else if(m.type==='dailyReport'){
     const date=m.date;const range=m.range;const label=m.label||date;
