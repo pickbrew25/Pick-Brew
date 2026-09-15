@@ -1460,7 +1460,7 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 <script>
 const CUR='PHP ',TAX=0.12;
 const CREATOR_PASS='Admin2026';
-const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.5.2'};
+const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.6.0'};
 const GITHUB_PAGES_URL='https://pickbrew25.github.io/Pick-Brew';
 const VERSION_URL=GITHUB_PAGES_URL+'/version.json';
 const UPDATE_URL=GITHUB_PAGES_URL+'/index.html';
@@ -4099,6 +4099,119 @@ function expectedDrawer(sh,paidOut){
   return (+sh.openingFloat||0)+b.cash-po;
 }
 
+/* ── ATTENDANCE, DRIVEN BY THE SHIFT ──────────────────────────────────
+ * Starting a shift clocks the cashier in; ending it clocks them out. The
+ * Attendance tab still works by hand, and the two cannot double up: clocking
+ * in reuses an open record for today if one already exists, and clocking out
+ * is a no-op if the record was already closed from the tab.
+ *
+ * A cashier with no linked employee row still gets an attendance record so
+ * the Dashboard's Attendance page shows them, but the Dashboard adds up
+ * payroll hours by employee_id — so the id is resolved by name first, and
+ * the cashier is told plainly when there is nothing to link to.
+ *
+ * Anything that fails offline is flagged and retried by retryShiftSync().
+ * ==================================================================== */
+
+/* The date the cashier would call today, not the UTC one. At UTC+8 a shift
+   opened at 6am carried the previous day's UTC date, which filed the whole
+   morning under yesterday. */
+function localDateKey(d){
+  d=d||new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
+        +'-'+String(d.getDate()).padStart(2,'0');
+}
+
+async function resolveEmployeeId(sh){
+  if(sh.supaId)return sh.supaId;
+  if(!sh.cashier)return null;
+  try{
+    const q='/rest/v1/employees?biz_id=eq.'+CLOUD.bizId
+      +'&name=eq.'+encodeURIComponent('"'+String(sh.cashier).replace(/"/g,'\\"')+'"')
+      +'&active=eq.true&select=id&limit=1';
+    const r=await fetch(SUPA_URL+q,{headers:cloudHeaders()});
+    if(!r.ok)return null;
+    const rows=await r.json();
+    if(Array.isArray(rows)&&rows[0]&&rows[0].id){
+      sh.supaId=rows[0].id;
+      // Remember it on the cashier too, so the next shift needs no lookup.
+      const c=(S.cashiers||[]).find(function(x){return x.name===sh.cashier;});
+      if(c&&!c.supaId)c.supaId=rows[0].id;
+      save();
+      return rows[0].id;
+    }
+  }catch(e){}
+  return null;
+}
+
+async function clockInForShift(sh){
+  if(!sh)return false;
+  if(!CLOUD.token||!CLOUD.bizId||!navigator.onLine){sh.attPending=true;save();return false;}
+  const h={...cloudHeaders(),'Prefer':'return=representation'};
+  const day=localDateKey(new Date(sh.startedAt||Date.now()));
+  const empId=await resolveEmployeeId(sh);
+  try{
+    // Already clocked in today and not yet out? Adopt that record.
+    if(empId){
+      const ex=await fetch(SUPA_URL+'/rest/v1/attendance?biz_id=eq.'+CLOUD.bizId
+        +'&employee_id=eq.'+empId+'&date=eq.'+day
+        +'&time_out=is.null&order=time_in.desc&limit=1',{headers:h});
+      if(ex.ok){
+        const rows=await ex.json();
+        if(Array.isArray(rows)&&rows[0]){
+          sh.attId=rows[0].id;sh.attPending=false;save();
+          return true;
+        }
+      }
+    }
+    const body={biz_id:CLOUD.bizId,employee_id:empId,employee_name:sh.cashier||'Cashier',
+      time_in:sh.startedAt||new Date().toISOString(),date:day};
+    const r=await fetch(SUPA_URL+'/rest/v1/attendance',
+      {method:'POST',headers:h,body:JSON.stringify(body)});
+    if(!r.ok){sh.attPending=true;save();return false;}
+    let rows=null;try{rows=await r.json();}catch(e){}
+    sh.attId=(Array.isArray(rows)&&rows[0]&&rows[0].id)?rows[0].id:null;
+    sh.attPending=false;sh.attNoEmployee=!empId;save();
+    return true;
+  }catch(e){sh.attPending=true;save();return false;}
+}
+
+async function clockOutForShift(rec){
+  if(!rec)return false;
+  if(!CLOUD.token||!CLOUD.bizId||!navigator.onLine){rec.attOutPending=true;save();return false;}
+  const h={...cloudHeaders(),'Prefer':'return=representation'};
+  const endISO=rec.endedAt||new Date().toISOString();
+  try{
+    let row=null;
+    if(rec.attId){
+      const g=await fetch(SUPA_URL+'/rest/v1/attendance?id=eq.'+rec.attId+'&limit=1',{headers:h});
+      if(g.ok){const rows=await g.json();if(Array.isArray(rows)&&rows[0])row=rows[0];}
+    }
+    if(!row){
+      // No id held, or the record was removed. Fall back to the open one.
+      const day=localDateKey(new Date(rec.startedAt||Date.now()));
+      const empId=rec.supaId||await resolveEmployeeId(rec);
+      const filt=empId
+        ? 'employee_id=eq.'+empId
+        : 'employee_name=eq.'+encodeURIComponent('"'+String(rec.cashier||'').replace(/"/g,'\\"')+'"');
+      const g2=await fetch(SUPA_URL+'/rest/v1/attendance?biz_id=eq.'+CLOUD.bizId+'&'+filt
+        +'&date=eq.'+day+'&time_out=is.null&order=time_in.desc&limit=1',{headers:h});
+      if(g2.ok){const rows=await g2.json();if(Array.isArray(rows)&&rows[0])row=rows[0];}
+    }
+    // Already clocked out by hand from the Attendance tab — leave it alone.
+    if(!row){rec.attOutPending=false;save();return true;}
+    if(row.time_out){rec.attOutPending=false;rec.attId=row.id;save();return true;}
+
+    const tIn=new Date(row.time_in),tOut=new Date(endISO);
+    const hrs=Math.max(0,Math.round((tOut-tIn)/36000)/100);
+    const r=await fetch(SUPA_URL+'/rest/v1/attendance?id=eq.'+row.id,
+      {method:'PATCH',headers:h,body:JSON.stringify({time_out:tOut.toISOString(),hours_worked:hrs})});
+    if(!r.ok){rec.attOutPending=true;save();return false;}
+    rec.attId=row.id;rec.attOutPending=false;rec.hoursWorked=hrs;save();
+    return true;
+  }catch(e){rec.attOutPending=true;save();return false;}
+}
+
 /* Pushes a closed shift up if the table exists. Written defensively: an
    install whose Supabase has no `shifts` table simply keeps the record on
    the device instead of throwing an error at the cashier. */
@@ -4793,7 +4906,8 @@ function renderAtt(scr){
     btn.onclick=async function(){
       btn.disabled=true;btn.style.opacity='0.5';
       const h2={...cloudHeaders(),'Prefer':'return=representation'};
-      const today=new Date().toISOString().slice(0,10);
+      // Local date, not the UTC one — see localDateKey().
+      const today=localDateKey();
       if(e.clockedIn){
         // Clock out - find the open attendance record
         const attRes=await fetch(SUPA_URL+'/rest/v1/attendance?biz_id=eq.'+CLOUD.bizId+'&employee_id=eq.'+e.id+'&date=eq.'+today+'&time_out=is.null&order=time_in.desc&limit=1',{headers:h2});
@@ -7086,6 +7200,12 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     const ni=document.createElement('input');ni.id='sfNote';ni.type='text';ni.placeholder='e.g. handed over by Ana';
     nf.appendChild(ni);body.appendChild(nf);
 
+    const ciN=document.createElement('div');
+    ciN.style.cssText='margin-top:12px;font-size:11.5px;color:var(--t3);line-height:1.5';
+    ciN.textContent='Starting the shift also clocks '+c.name+' in for today. '
+      +'Ending it clocks them out.';
+    body.appendChild(ciN);
+
     const btns=document.createElement('div');btns.className='mbtns';
     const cancel=document.createElement('button');cancel.textContent='Cancel';cancel.onclick=closeModal;
     const go=document.createElement('button');go.className='mpri';go.textContent='Start shift';
@@ -7104,6 +7224,16 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
       save();closeModal();
       toast('Shift started · float '+fmt(v));
       render();
+      /* Clock in. Not awaited: the shift is already open locally and the
+         cashier should not be kept waiting on the network to start selling. */
+      clockInForShift(S.openShift).then(function(ok){
+        if(!ok){toast('Shift open — clock-in will sync when back online');return;}
+        if(S.openShift&&S.openShift.attNoEmployee){
+          toast(c.name+' clocked in — add them under Employees to count payroll hours');
+        } else {
+          toast(c.name+' clocked in');
+        }
+      });
     };
     fi.onkeydown=function(e){if(e.key==='Enter')go.onclick();};
     btns.appendChild(cancel);btns.appendChild(go);body.appendChild(btns);
@@ -7196,6 +7326,11 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
     verdict.style.cssText='margin-top:12px;padding:13px;border-radius:0;text-align:center';
     body.appendChild(verdict);
 
+    const coN=document.createElement('div');
+    coN.style.cssText='margin-top:12px;font-size:11.5px;color:var(--t3);line-height:1.5';
+    coN.textContent='Ending the shift clocks '+sh.cashier+' out and records the hours.';
+    body.appendChild(coN);
+
     const nf2=document.createElement('div');nf2.className='mf';nf2.style.marginTop='12px';
     nf2.innerHTML='<label>Note (optional)</label>';
     const ni2=document.createElement('input');ni2.id='csNote';ni2.type='text';ni2.placeholder='e.g. 20 short, checked twice';
@@ -7280,6 +7415,13 @@ uiPrompt('Stock will be restored. Enter the admin password to authorise.',
         toast('Shift closed · '+vl.text);
         render();
         pushShiftToCloud(rec);
+        clockOutForShift(rec).then(function(ok){
+          if(ok&&rec.hoursWorked!==undefined&&rec.hoursWorked!==null){
+            toast(rec.cashier+' clocked out · '+rec.hoursWorked.toFixed(2)+'h');
+          } else if(!ok){
+            toast('Clock-out will sync when back online');
+          }
+        });
       };
       /* A discrepancy is confirmed out loud rather than slipping past, but it
          is never blocked — the count is what it is. */
@@ -7909,6 +8051,11 @@ async function retryShiftSync(){
     const ok=await pushShiftToCloud(pend[i]);
     if(ok)n++;
   }
+  /* Attendance is retried alongside, in the same order it happened: a shift
+     still open needs its clock-in, closed ones need their clock-out. */
+  if(S.openShift&&S.openShift.attPending)await clockInForShift(S.openShift);
+  const outPend=(S.shiftLog||[]).filter(function(r){return r.attOutPending;});
+  for(let j=0;j<outPend.length;j++)await clockOutForShift(outPend[j]);
   if(n)render();
   return n;
 }
@@ -7921,7 +8068,8 @@ setInterval(async function(){
     const ps=await retryPrepSync();
     if(ps&&(ps.ings||ps.recipes))render();
   }
-  if((S.shiftLog||[]).some(function(r){return !r.cloudSynced;}))await retryShiftSync();
+  if((S.shiftLog||[]).some(function(r){return !r.cloudSynced||r.attOutPending;})
+     ||(S.openShift&&S.openShift.attPending))await retryShiftSync();
 },60000);
 
 // ── BARCODE SCANNER INPUT ────────────────────────────────────
