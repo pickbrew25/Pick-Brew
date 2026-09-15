@@ -1460,7 +1460,7 @@ textarea:focus-visible, .pcard:focus-visible, .cat:focus-visible, .tab:focus-vis
 <script>
 const CUR='PHP ',TAX=0.12;
 const CREATOR_PASS='Admin2026';
-const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.6.0'};
+const CR={name:'Reymar Arroyo',phone:'+639063964052',email:'areymar36@gmail.com',app:'Arroyo POS',ver:'7.6.1'};
 const GITHUB_PAGES_URL='https://pickbrew25.github.io/Pick-Brew';
 const VERSION_URL=GITHUB_PAGES_URL+'/version.json';
 const UPDATE_URL=GITHUB_PAGES_URL+'/index.html';
@@ -4816,6 +4816,28 @@ function renderDrawerSection(scr){
       n.textContent='Excludes '+fmt(bd.gcash+bd.credit)+' taken by GCash or credit — no notes changed hands.';
       box.appendChild(n);
     }
+    /* Whether the open drawer is actually clocked in. Previously invisible,
+       which meant a failed clock-in looked identical to a working one. */
+    const attLine=document.createElement('div');
+    attLine.style.cssText='font-size:11.5px;line-height:1.5;padding:2px 0 8px';
+    if(S.openShift&&S.openShift.attId){
+      attLine.style.color='var(--st)';
+      attLine.textContent='✓ '+S.openShift.cashier+' is clocked in'
+        +(S.openShift.attNoEmployee?' (not linked to an employee — payroll hours will not count)':'');
+    } else if(S.openShift){
+      attLine.style.color='var(--wt)';
+      attLine.textContent='⚠ Not clocked in yet — tap to try now';
+      attLine.style.cursor='pointer';
+      attLine.onclick=async function(){
+        attLine.textContent='Clocking in…';
+        const ok=await clockInForShift(S.openShift);
+        if(ok){toast(S.openShift.cashier+' clocked in');}
+        else{toast('Could not clock in — check you are signed in and online');}
+        render();
+      };
+    }
+    if(S.openShift)box.appendChild(attLine);
+
     const cbtn=document.createElement('button');
     cbtn.className='abtn';cbtn.style.cssText='width:100%;margin-top:11px;padding:13px;font-weight:700;border-radius:0';
     cbtn.textContent='Check out & count drawer';
@@ -8040,6 +8062,19 @@ window.addEventListener('online',async function(){
   await retryShiftSync();
 });
 
+/* Runs once on boot, for the shift that is open right now. Without it, a till
+   left open across an update sits there un-clocked-in until the next minute
+   tick, and the cashier has no way to tell. */
+setTimeout(async function(){
+  try{
+    if(!CLOUD.token||!CLOUD.bizId||!navigator.onLine)return;
+    if(S.openShift&&!S.openShift.attId){
+      const ok=await clockInForShift(S.openShift);
+      if(ok){render();toast(S.openShift.cashier+' clocked in');}
+    }
+  }catch(e){}
+},4000);
+
 /* Closed shifts that never reached the cloud are pushed again here. Kept
    separate from the sales queue so a missing `shifts` table can never block
    sales from syncing. */
@@ -8052,8 +8087,11 @@ async function retryShiftSync(){
     if(ok)n++;
   }
   /* Attendance is retried alongside, in the same order it happened: a shift
-     still open needs its clock-in, closed ones need their clock-out. */
-  if(S.openShift&&S.openShift.attPending)await clockInForShift(S.openShift);
+     still open needs its clock-in, closed ones need their clock-out.
+     The test is "has no attendance record", not "a previous attempt failed" —
+     a shift already open when this build arrived never had an attempt made,
+     and an open drawer with nobody clocked in is the whole bug. */
+  if(S.openShift&&!S.openShift.attId)await clockInForShift(S.openShift);
   const outPend=(S.shiftLog||[]).filter(function(r){return r.attOutPending;});
   for(let j=0;j<outPend.length;j++)await clockOutForShift(outPend[j]);
   if(n)render();
@@ -8069,7 +8107,7 @@ setInterval(async function(){
     if(ps&&(ps.ings||ps.recipes))render();
   }
   if((S.shiftLog||[]).some(function(r){return !r.cloudSynced||r.attOutPending;})
-     ||(S.openShift&&S.openShift.attPending))await retryShiftSync();
+     ||(S.openShift&&!S.openShift.attId))await retryShiftSync();
 },60000);
 
 // ── BARCODE SCANNER INPUT ────────────────────────────────────
