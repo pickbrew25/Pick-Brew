@@ -506,7 +506,7 @@ function loadSession(){try{const s=JSON.parse(localStorage.getItem('apos_dash')|
 
 let _loadDataBusy=false;
 let _loadDataTimer=null;
-async function loadData(){
+async function loadData(force){
   if(!SESSION.token){
     console.warn('[ArroyoDash] loadData skipped - no token');
     return;
@@ -515,7 +515,7 @@ async function loadData(){
     console.warn('[ArroyoDash] loadData already running — skipping duplicate call');
     return;
   }
-  if(_loadDataTimer){
+  if(_loadDataTimer&&!force){
     console.warn('[ArroyoDash] loadData debounced — too soon after last run');
     return;
   }
@@ -576,6 +576,12 @@ async function loadData(){
   ]);
   const keys=['sales','expenses','products','employees','attendance','customers','credit','suppliers','pos','ingredients','recipes','wastage','orders','loans','leaves','shifts'];
   keys.forEach(function(k,i){D[k]=Array.isArray(results[i])?results[i]:[];});
+  /* items is jsonb, but a row written as a JSON string would throw on
+     .forEach and blank the entire page. Normalise once, here. */
+  D.sales.forEach(function(s){
+    if(typeof s.items==='string'){try{s.items=JSON.parse(s.items);}catch(e){s.items=[];}}
+    if(!Array.isArray(s.items))s.items=[];
+  });
   console.log('[ArroyoDash] Data loaded - sales:',D.sales.length,'expenses:',D.expenses.length,'products:',D.products.length);
   UI.loading=false;
   await loadSettingsFromCloud();
@@ -689,9 +695,9 @@ function mfField(box,id,lbl,type,val,ph,opts){
     inp=document.createElement('select');inp.id=id;
     (opts||[]).forEach(function(o){const op=document.createElement('option');op.value=o.v;op.textContent=o.l;if(o.v==val)op.selected=true;inp.appendChild(op);});
   } else if(type==='textarea'){
-    inp=document.createElement('textarea');inp.id=id;inp.placeholder=ph||'';inp.value=val||'';
+    inp=document.createElement('textarea');inp.id=id;inp.placeholder=ph||'';inp.value=(val===null||val===undefined)?'':String(val);
   } else {
-    inp=document.createElement('input');inp.type=type||'text';inp.id=id;inp.value=val||'';inp.placeholder=ph||'';if(type==='number')inp.min='0';
+    inp=document.createElement('input');inp.type=type||'text';inp.id=id;inp.value=(val===null||val===undefined||val==='')?'':String(val);inp.placeholder=ph||'';if(type==='number')inp.min='0';
   }
   mf.appendChild(inp);box.appendChild(mf);
 }
@@ -831,7 +837,7 @@ function renderApp(root){
     mSync.textContent='...';updateSyncStatus('syncing');
     const authed=await ensureDashAuth();
     if(!authed){mSync.textContent='Sync';updateSyncStatus('error','Session expired');alert('Session expired. Please sign in again.');return;}
-    await loadData();
+    await loadData(true);
   };
   mTop.appendChild(hamBtn);mTop.appendChild(mInfo);mTop.appendChild(mSync);
   app.appendChild(mTop);
@@ -927,7 +933,7 @@ function renderApp(root){
     /* loadData() re-renders, which replaces this button with a fresh one that
        already reads "Sync data", and sets the status line itself. Touching
        syncBtn afterwards would only write to a detached node. */
-    await loadData();
+    await loadData(true);
   };
   foot.appendChild(syncBtn);
   const soBtn=el('button','so-btn','<i class="ti ti-logout" style="font-size:14px;vertical-align:-2px;margin-right:4px"></i>Sign out');
@@ -938,7 +944,9 @@ function renderApp(root){
   const fs=filteredSales();const fe=filteredExp();
   const rev=fs.reduce(function(a,s){return a+s.total;},0);
   const exp=fe.reduce(function(a,e){return a+e.amount;},0);
-  const net=rev-exp;
+  /* Was rev-exp. Cost of goods was missing, so the net profit shown on
+     Reports disagreed with Overview and could exceed gross profit. */
+  const net=rev-calcCOGS(fs)-exp;
   if(UI.page==='overview'){renderOverview(main,fs,fe,rev,exp,net);}
   else if(UI.page==='sales'){renderSales(main,fs,rev);}
   else if(UI.page==='inventory'){renderInventory(main);}
@@ -988,14 +996,16 @@ function renderOverview(main,fs,fe,rev,exp,net){
   if(lowItems.length>0){
     const alert=el('div','');
     alert.style.cssText='background:var(--dg);border:1px solid var(--dt);border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;cursor:pointer';
-    alert.innerHTML='<i class="ti ti-alert-triangle" style="font-size:18px;color:var(--dt);flex-shrink:0" aria-hidden="true"></i><div><div style="font-weight:700;color:var(--dt)">'+lowItems.length+' ingredient'+(lowItems.length>1?'s':'')+' running low</div><div style="font-size:12px;color:var(--t2);margin-top:2px">'+lowItems.map(function(i){return i.name+' ('+i.stock+' '+esc(i.unit)+' left)';}).join(' · ')+'</div></div>';
+    alert.innerHTML='<i class="ti ti-alert-triangle" style="font-size:18px;color:var(--dt);flex-shrink:0" aria-hidden="true"></i><div><div style="font-weight:700;color:var(--dt)">'+lowItems.length+' ingredient'+(lowItems.length>1?'s':'')+' running low</div><div style="font-size:12px;color:var(--t2);margin-top:2px">'+lowItems.map(function(i){return esc(i.name)+' ('+i.stock+' '+esc(i.unit)+' left)';}).join(' · ')+'</div></div>';
     alert.onclick=function(){UI.page='ingredients';render();};
     main.appendChild(alert);
   }
   main.appendChild(filterBar());
   const cogs=calcCOGS(fs);
   const grossProfit=rev-cogs;
-  const netProfit=rev-exp;
+  /* Was rev-exp, which left ingredient cost out of the bottom line and let
+     net profit come out higher than gross profit. */
+  const netProfit=rev-cogs-exp;
   const grossMargin=rev>0?Math.round(grossProfit/rev*100):0;
   const sg=el('div','stats-grid');
   sg.appendChild(statCard('Revenue',fmt(rev),fs.length+' transactions','blue'));
@@ -1079,7 +1089,7 @@ function renderOverview(main,fs,fe,rev,exp,net){
   two.appendChild(pm);
   const ra=el('div','card');ra.innerHTML='<div class="card-hd">Recent sales</div>';
   fs.slice(0,6).forEach(function(s){
-    const items=(s.items||[]).map(function(i){return i.name;}).join(', ').slice(0,35);
+    const items=esc((s.items||[]).map(function(i){return i.name;}).join(', ').slice(0,35));
     const r=el('div','row');r.innerHTML='<div class="row-l"><div class="row-name">'+items+'</div><div class="row-sub">'+ft(s.date)+'</div></div><div style="font-weight:700;color:var(--ac)">'+fmt(s.total)+'</div>';
     ra.appendChild(r);
   });
@@ -1139,9 +1149,9 @@ function renderSales(main,fs,rev){
   const tb=document.createElement('tbody');
   fs.slice(0,100).forEach(function(s){
     const tr=document.createElement('tr');
-    const items=(s.items||[]).map(function(i){return i.name+(i.qty>1?' x'+i.qty:'');}).join(', ').slice(0,40);
+    const items=esc((s.items||[]).map(function(i){return i.name+(i.qty>1?' x'+i.qty:'');}).join(', ').slice(0,40));
     const mcls={Cash:'b-green',Card:'b-blue',GCash:'b-purple',Utang:'b-amber'}[s.method]||'b-gray';
-    tr.innerHTML='<td style="font-family:monospace;font-size:11px">'+esc(s.txn_id)+'</td><td>'+items+'</td><td style="white-space:nowrap;font-size:12px">'+fd(s.date)+'</td><td style="font-size:12px;color:var(--t3)">'+s.cashier+'</td><td><span class="badge '+mcls+'">'+esc(s.method)+'</span></td><td style="text-align:right;font-weight:700">'+fmt(s.total)+'</td>';
+    tr.innerHTML='<td style="font-family:monospace;font-size:11px">'+esc(s.txn_id)+'</td><td>'+items+'</td><td style="white-space:nowrap;font-size:12px">'+fd(s.date)+'</td><td style="font-size:12px;color:var(--t3)">'+esc(s.cashier)+'</td><td><span class="badge '+mcls+'">'+esc(s.method)+'</span></td><td style="text-align:right;font-weight:700">'+fmt(s.total)+'</td>';
     tb.appendChild(tr);
   });
   tbl.appendChild(tb);c.appendChild(tbl);main.appendChild(c);
@@ -1168,7 +1178,7 @@ function renderInventory(main){
   const c=el('div','card');
   const chd=el('div','card-hd','All products');chd.appendChild(addBtn('+ Add',function(){UI.modal={type:'product',item:null};render();}));c.appendChild(chd);
   if(!D.products.length){const em=el('div','empty','No products yet. Tap <strong>+ Add Item</strong> above to add one, or sync from POS.');em.style.lineHeight='1.7';c.appendChild(em);main.appendChild(c);return;}
-  D.products.sort(function(a,b){return a.stock-b.stock;}).forEach(function(p){
+  D.products.slice().sort(function(a,b){return a.stock-b.stock;}).forEach(function(p){
     const isOut=p.stock!==999&&p.stock<=0;const isLow=p.stock!==999&&p.stock>0&&p.stock<=5;
     const r=el('div','row');
     const rl=el('div','row-l');rl.innerHTML='<div class="row-name">'+esc(p.name)+'</div><div class="row-sub">'+esc(p.cat)+' · '+fmt(p.price)+'</div>';
@@ -1725,7 +1735,7 @@ function renderRecipes(main){
   const hRow2=el('div','');hRow2.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:8px';
   hRow2.appendChild(el('div','page-title','Recipes'));
   const syncRecBtn=el('button','add-btn','⟳ Sync from POS');
-  syncRecBtn.onclick=async function(){syncRecBtn.textContent='Syncing...';syncRecBtn.disabled=true;await loadData();syncRecBtn.textContent='⟳ Sync from POS';syncRecBtn.disabled=false;};
+  syncRecBtn.onclick=async function(){syncRecBtn.textContent='Syncing...';syncRecBtn.disabled=true;await loadData(true);syncRecBtn.textContent='⟳ Sync from POS';syncRecBtn.disabled=false;};
   hRow2.appendChild(syncRecBtn);main.appendChild(hRow2);
   const prodWithRecipe=new Set(D.recipes.map(function(r){return r.product_name;})).size;
 
@@ -1752,7 +1762,7 @@ function renderRecipes(main){
   main.appendChild(sg);
 
   const note=el('div','');note.style.cssText='font-size:13px;color:var(--t2);margin-bottom:16px;padding:12px 14px;background:var(--bg2);border-radius:10px;line-height:1.6';
-  note.textContent='Set up ingredients per product here. When a product is sold on the POS, its ingredients are automatically deducted from stock.';
+  note.textContent='Set up ingredients per product here. Each sale deducts these quantities from ingredient stock automatically. Renaming a product moves its recipe lines with it.';
   main.appendChild(note);
 
   D.products.forEach(function(p){
@@ -1814,7 +1824,7 @@ function renderIngredients(main){
 
   // Calculations
   const totalCostValue=D.ingredients.reduce(function(a,i){return a+i.stock*ingCost(i);},0);
-  const low=D.ingredients.filter(function(i){return i.stock<=ingLow(i);}).length;
+  const low=D.ingredients.filter(function(i){return i.stock>0&&i.stock<=ingLow(i);}).length;
   const out=D.ingredients.filter(function(i){return i.stock<=0;}).length;
 
   // Daily consumption — based on last 7 days sales
@@ -1829,8 +1839,14 @@ function renderIngredients(main){
       });
     });
   });
-  // Convert to daily avg (divide by 7)
-  Object.keys(dailyConsumption).forEach(function(k){dailyConsumption[k]=dailyConsumption[k]/7;});
+  /* Divide by the span actually covered by the data, not a flat 7. A shop
+     two days old was reading its burn rate 3.5x too low. */
+  let spanDays=7;
+  if(recentSales.length){
+    const oldest=recentSales.reduce(function(a,s){const d=new Date(s.date);return d<a?d:a;},new Date());
+    spanDays=Math.min(7,Math.max(1,Math.ceil((now-oldest)/86400000)));
+  }
+  Object.keys(dailyConsumption).forEach(function(k){dailyConsumption[k]=dailyConsumption[k]/spanDays;});
 
   // Days of stock remaining per ingredient
   const daysRemaining={};
@@ -1852,7 +1868,7 @@ function renderIngredients(main){
   const costRows=[
     ['Total ingredient value',fmt(totalCostValue),''],
     ['Average cost per ingredient',D.ingredients.length?fmt(totalCostValue/D.ingredients.length):'PHP 0.00',''],
-    ['Most expensive ingredient',(function(){const s=D.ingredients.slice().sort(function(a,b){return b.stock*ingCost(b)-a.stock*ingCost(a);});return s[0]?s[0].name+' ('+fmt(s[0].stock*ingCost(s[0]))+')':'None';})(),''],
+    ['Most expensive ingredient',(function(){const s=D.ingredients.slice().sort(function(a,b){return b.stock*ingCost(b)-a.stock*ingCost(a);});return s[0]?esc(s[0].name)+' ('+fmt(s[0].stock*ingCost(s[0]))+')':'None';})(),''],
   ];
   costRows.forEach(function(row){
     const r=el('div','payslip-row');
@@ -1864,7 +1880,7 @@ function renderIngredients(main){
   // Stock list with days remaining
   const c=el('div','card');
   const hd=el('div','card-hd','Ingredient stock');hd.appendChild(addBtn('+ Add ingredient',function(){UI.modal={type:'ingredient',item:null};render();}));c.appendChild(hd);
-  D.ingredients.sort(function(a,b){return a.stock-b.stock;}).forEach(function(ing){
+  D.ingredients.slice().sort(function(a,b){return a.stock-b.stock;}).forEach(function(ing){
     const isLow=ing.stock<=ingLow(ing);
     const days=daysRemaining[ing.id];
     const dailyUse=dailyConsumption[ing.id]||0;
@@ -1963,14 +1979,28 @@ function renderPnL(main,fs,fe,rev,exp,net){
   main.appendChild(filterBar());
 
   const cogs=calcCOGS(fs);
-  const grossProfit=rev-cogs;
-  const grossMargin=rev>0?Math.round(grossProfit/rev*100):0;
   const vat=rev/1.12*0.12;
   const netSales=rev-vat;
-  const netProfit=rev-exp;
-  const netMargin=rev>0?Math.round(netProfit/rev*100):0;
   const salaryExp=D.employees.filter(function(e){return e.pay_type==='monthly';}).reduce(function(a,e){return a+e.rate;},0);
-  const wasteCost=D.wastage.reduce(function(a,w){return a+w.cost;},0);
+  /* Wastage was all-time while the statement was labelled "this week".
+     Filter it the same way sales and expenses are filtered. */
+  const nowPl=new Date();
+  const wasteCost=D.wastage.filter(function(w){
+    const d=new Date(w.date);
+    if(UI.filter==='today')return d.toDateString()===nowPl.toDateString();
+    if(UI.filter==='week'){const x=new Date(nowPl);x.setDate(x.getDate()-7);return d>=x;}
+    if(UI.filter==='month'){const x=new Date(nowPl);x.setDate(x.getDate()-30);return d>=x;}
+    return true;
+  }).reduce(function(a,w){return a+(w.cost||0);},0);
+  /* A real waterfall: revenue -> less COGS and wastage -> gross profit ->
+     less operating expenses and salaries -> net profit. Every line printed
+     below is now actually subtracted. */
+  const totalCogs=cogs+wasteCost;
+  const grossProfit=rev-totalCogs;
+  const totalOpex=exp+salaryExp;
+  const netProfit=grossProfit-totalOpex;
+  const grossMargin=rev>0?Math.round(grossProfit/rev*100):0;
+  const netMargin=rev>0?Math.round(netProfit/rev*100):0;
 
   // Summary stats
   const sg=el('div','stats-grid');
@@ -2009,8 +2039,9 @@ function renderPnL(main,fs,fe,rev,exp,net){
   plRow('Net sales (excl. VAT)',fmt(netSales),'var(--ac)',true);
 
   plSection('Cost of Goods Sold');
-  plRow('Ingredient costs',fmt(cogs),'var(--t2)',false);
-  plRow('Wastage / spoilage',fmt(wasteCost),'var(--wt)',false);
+  plRow('Ingredient costs',fmt(cogs),'var(--t2)',false,true);
+  plRow('Wastage / spoilage',fmt(wasteCost),'var(--wt)',false,true);
+  plRow('Total cost of goods sold',fmt(totalCogs),'var(--t2)',true);
   plTotal('Gross Profit',fmt(grossProfit),grossProfit>=0?'var(--st)':'var(--dt)');
   const r1=el('div','');r1.style.cssText='font-size:11px;color:var(--t3);padding:4px 0 8px;text-align:right';r1.textContent='Gross margin: '+grossMargin+'%';pl.appendChild(r1);
 
@@ -2020,7 +2051,7 @@ function renderPnL(main,fs,fe,rev,exp,net){
   fe.forEach(function(e){expByCat[e.cat||'Other']=(expByCat[e.cat||'Other']||0)+e.amount;});
   Object.entries(expByCat).forEach(function(entry){plRow(entry[0],fmt(entry[1]),'var(--t2)',false,true);});
   if(salaryExp>0)plRow('Salaries (monthly staff)',fmt(salaryExp),'var(--t2)',false,true);
-  plRow('Total operating expenses',fmt(exp+salaryExp),'var(--t2)',true);
+  plRow('Total operating expenses',fmt(totalOpex),'var(--t2)',true);
   plTotal('Net Profit',fmt(netProfit),netProfit>=0?'var(--st)':'var(--dt)');
   const r2=el('div','');r2.style.cssText='font-size:11px;color:var(--t3);padding:4px 0 8px;text-align:right';r2.textContent='Net margin: '+netMargin+'%';pl.appendChild(r2);
 
@@ -2037,10 +2068,19 @@ function renderPnL(main,fs,fe,rev,exp,net){
       const ing=D.ingredients.find(function(i){return i.id===r.ingredient_id;});
       if(ing)cogs2+=r.qty_used*ingCost(ing);
     });
-    const sold=fs.filter(function(s){return!s.voided;}).reduce(function(a,s){
-      return a+(s.items||[]).filter(function(i){return i.name===p.name;}).reduce(function(b,i){return b+(i.qty||1);},0);
-    },0);
-    if(sold>0)prodProfit.push({name:p.name,price:p.price,cogs:cogs2,margin:p.price>0?Math.round((p.price-cogs2)/p.price*100):0,sold,totalProfit:(p.price-cogs2)*sold});
+    /* Use what the line actually rang up, not the current list price, so
+       discounts and sale_pct are reflected instead of overstating profit. */
+    let sold=0,lineRev=0;
+    fs.filter(function(s){return!s.voided;}).forEach(function(s){
+      (s.items||[]).forEach(function(i){
+        if(i.name!==p.name)return;
+        const q=i.qty||1;
+        sold+=q;
+        lineRev+=(i.price!=null?Number(i.price):Number(p.price)||0)*q;
+      });
+    });
+    const avgPrice=sold>0?lineRev/sold:Number(p.price)||0;
+    if(sold>0)prodProfit.push({name:p.name,price:avgPrice,cogs:cogs2,margin:avgPrice>0?Math.round((avgPrice-cogs2)/avgPrice*100):0,sold,totalProfit:lineRev-(cogs2*sold)});
   });
   prodProfit.sort(function(a,b){return b.totalProfit-a.totalProfit;});
   if(!prodProfit.length){
@@ -2307,7 +2347,7 @@ function renderModal(root){
     mfField(box,'pName','Product name','text',it.name,'e.g. Coffee, T-shirt');
     mfField(box,'pPrice','Price (PHP)','number',it.price||'','0');
     mfField(box,'pCat','Category','text',it.cat||'','e.g. Drinks, Tops');
-    mfField(box,'pStock','Stock (blank = unlimited)','number',(it.stock===999||it.stock===undefined)?'':it.stock,'');
+    mfField(box,'pStock','Stock (blank = unlimited)','number',(it.stock===999||it.stock==null)?'':it.stock,'');
     const iconDiv=el('div','mf');
     const iconLbl=el('label','','Icon code (optional)');iconDiv.appendChild(iconLbl);
     const iconSel=document.createElement('select');iconSel.id='pIcon';
@@ -2337,6 +2377,10 @@ function renderModal(root){
         // PATCH only the fields the user can edit here.
         // Preserve variants, img, and sale_pct that come from the POS — do not overwrite them.
         const patch={name:nm,price:pr,cat:ct,stock:stk,icon:ic};
+        /* recipes are keyed on product_name, not on an id. Without this
+           cascade a rename orphans every recipe line for the product:
+           stock stops being deducted and COGS silently drops to zero. */
+        const oldName=it.name;
         /* The POS matches cloud products on local_id. A row with a null
            local_id is invisible to that match, so the POS treats its own copy
            as new and posts a duplicate. Backfill one here. */
@@ -2346,6 +2390,14 @@ function renderModal(root){
         }
         const r=await api('/rest/v1/products?id=eq.'+it.id,{method:'PATCH',headers:{'Prefer':'return=representation'},body:JSON.stringify(patch)});
         if(r===null){alert('Save failed. Check connection.');return;}
+        if(oldName&&oldName!==nm){
+          /* PostgREST needs the value double-quoted or a name containing a
+             comma, dot or bracket ("Latte (Large)") is parsed as a filter. */
+          const nameFilter=encodeURIComponent('"'+String(oldName).replace(/"/g,'\\"')+'"');
+          const moved=await api('/rest/v1/recipes?biz_id=eq.'+SESSION.bizId+'&product_name=eq.'+nameFilter,
+            {method:'PATCH',body:JSON.stringify({product_name:nm})});
+          if(moved===null)alert('Product renamed, but its recipe lines could not be moved. Open Recipes and check '+nm+'.');
+        }
       }
       UI.modal=null;await loadData();
     },'Save',onDelProduct);
@@ -2373,7 +2425,7 @@ function renderModal(root){
     const ifld=el('div','mf','<label>Ingredient</label>');
     const isel=document.createElement('select');isel.id='rIng';
     D.ingredients.forEach(function(ing){
-      const op=document.createElement('option');op.value=ing.id+'|'+ing.name+'|'+ing.unit;op.textContent=ing.name+' ('+ing.stock+' '+ing.unit+' in stock)';
+      const op=document.createElement('option');op.value=ing.id;op.textContent=ing.name+' ('+ing.stock+' '+ing.unit+' in stock)';
       if(r.ingredient_id===ing.id)op.selected=true;isel.appendChild(op);
     });
     ifld.appendChild(isel);box.appendChild(ifld);
@@ -2382,20 +2434,17 @@ function renderModal(root){
     // Unit hint
     const hint=el('div','');hint.id='rHint';hint.style.cssText='font-size:12px;color:var(--t3);margin-top:-8px';
     box.appendChild(hint);
-    isel.onchange=function(){
-      const parts=this.value.split('|');
-      hint.textContent='Unit: '+(parts[2]||'');
-    };
-    if(D.ingredients.length>0){
-      const parts=isel.value.split('|');
-      hint.textContent='Unit: '+(parts[2]||'');
-    }
+    function ingUnitOf(id){const f=D.ingredients.find(function(x){return x.id===id;});return f?f.unit:'';}
+    isel.onchange=function(){hint.textContent='Unit: '+ingUnitOf(this.value);};
+    if(D.ingredients.length>0){hint.textContent='Unit: '+ingUnitOf(isel.value);}
     modalBtns(box,function(){UI.modal=null;render();},async function(){
-      const ingVal=gv('rIng');const qty=parseFloat(gv('rQty'))||1;
+      const ingVal=gv('rIng');const qty=parseFloat(gv('rQty'));
       if(!ingVal){alert('Select an ingredient');return;}
+      if(!(qty>0)){alert('Quantity used per sale must be greater than 0');return;}
       if(!SESSION.bizId){alert('No business found. Please sign out and sign in again.');return;}
-      const parts=ingVal.split('|');
-      const ingId=parts[0];const ingName=parts[1];
+      const ingRow=D.ingredients.find(function(x){return x.id===ingVal;});
+      if(!ingRow){alert('That ingredient no longer exists. Sync and try again.');return;}
+      const ingId=ingRow.id;const ingName=ingRow.name;
       let result;
       if(isNew){
         result=await api('/rest/v1/recipes',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify({biz_id:SESSION.bizId,product_name:p.name,ingredient_id:ingId,ingredient_name:ingName,qty_used:qty})});
@@ -2464,29 +2513,76 @@ function renderModal(root){
     box.appendChild(calcCard);
 
     mfField(box,'iStock','Current stock (in your unit)','number',it.stock,'0');
-    mfField(box,'iThresh','Low stock alert at','number',ingLow(it)||5,'5');
+    if(!isNew){
+      const sn=el('div','');sn.style.cssText='font-size:11.5px;color:var(--t3);margin-top:-8px;line-height:1.5';
+      sn.textContent='Applied as a change, not an overwrite — sales deducted while this is open are kept.';
+      box.appendChild(sn);
+    }
+    mfField(box,'iThresh','Low stock alert at','number',(it.low_threshold!=null?it.low_threshold:(it.low!=null?it.low:5)),'5');
     mfField(box,'iCost','Cost per unit (PHP)','number',ingCost(it),'0');
 
     modalBtns(box,close,async function(){
       const name=gv('iName');
       if(!name){alert('Enter ingredient name');return;}
       if(!SESSION.bizId){alert('No business found. Please sign out and sign in again.');return;}
-      const p={biz_id:SESSION.bizId,name,unit:gv('iUnit')||'g',stock:parseFloat(gv('iStock'))||0,low_threshold:parseFloat(gv('iThresh'))||5,cost_per_unit:parseFloat(gv('iCost'))||0};
-      const endpoint=it.id?'/rest/v1/ingredients?id=eq.'+it.id:'/rest/v1/ingredients';
-      const method=it.id?'PATCH':'POST';
-      const result=await api(endpoint,{method,headers:{'Prefer':'return=representation'},body:JSON.stringify(p)});
-      if(result===null){alert('Save failed. Check your connection and try again.');return;}
-      UI.modal=null;await loadData();
+      const typedStock=parseFloat(gv('iStock'))||0;
+      const p={biz_id:SESSION.bizId,name,unit:gv('iUnit')||'g',low_threshold:parseFloat(gv('iThresh'))||0,cost_per_unit:parseFloat(gv('iCost'))||0};
+      if(!it.id){
+        p.stock=typedStock;
+        const result=await api('/rest/v1/ingredients',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(p)});
+        if(result===null){alert('Save failed. Check your connection and try again.');return;}
+      } else {
+        /* Never PATCH stock as an absolute value. The number in this field
+           was read when the modal opened; the POS may have deducted sales
+           since. Writing it back would erase them silently. Send only the
+           difference, and let Postgres apply it to whatever the live value
+           is by the time it arrives. */
+        const result=await api('/rest/v1/ingredients?id=eq.'+it.id,{method:'PATCH',headers:{'Prefer':'return=representation'},body:JSON.stringify(p)});
+        if(result===null){alert('Save failed. Check your connection and try again.');return;}
+        const baseStock=Number(it.stock)||0;
+        const delta=typedStock-baseStock;
+        if(Math.abs(delta)>0.0005){
+          const adj=await api('/rest/v1/rpc/adjust_ingredient_stock',{method:'POST',
+            body:JSON.stringify({ing_id:it.id,delta:delta})});
+          if(adj===null){
+            alert('Saved, but the stock change could not be applied.\n\n'+
+                  'If this keeps happening, patch-7.4.7.sql has not been run in Supabase yet.');
+          }
+        }
+      }
+      UI.modal=null;await loadData(true);
     },isNew?'Add':'Save',it.id?async function(){uiConfirm('Delete '+it.name+'?',async function(__ok){if(__ok){await api('/rest/v1/ingredients?id=eq.'+it.id,{method:'DELETE'});UI.modal=null;await loadData();}else{close();}},{tone:'dang'});}:null);
 
   } else if(m.type==='wastage'){
     box.appendChild(el('div','modal-title','Log wastage'));
+    /* Linking the entry to a real ingredient is what makes it deduct stock.
+       Left on "Not linked" it behaves exactly as it used to: a cost record
+       only, with stock untouched. */
+    const wfld=el('div','mf','<label>Ingredient (deducts stock)</label>');
+    const wsel=document.createElement('select');wsel.id='wIng';
+    const none=document.createElement('option');none.value='';none.textContent='Not linked — cost only';
+    wsel.appendChild(none);
+    D.ingredients.forEach(function(ing){
+      const o=document.createElement('option');o.value=ing.id;
+      o.textContent=ing.name+' ('+ing.stock+' '+ing.unit+' in stock)';wsel.appendChild(o);
+    });
+    wfld.appendChild(wsel);box.appendChild(wfld);
     mfField(box,'wItem','Item name','text','','e.g. Bread, Coffee');
     mfField(box,'wQty','Quantity','number','1','1');
     mfField(box,'wCost','Estimated cost (PHP)','number','0','0');
     mfField(box,'wReason','Reason','text','','e.g. Expired, Dropped');
+    wsel.onchange=function(){
+      const f=D.ingredients.find(function(x){return x.id===wsel.value;});
+      if(!f)return;
+      const ni=document.getElementById('wItem');if(ni&&!ni.value)ni.value=f.name;
+      const q=parseFloat((document.getElementById('wQty')||{}).value)||0;
+      const ce=document.getElementById('wCost');
+      if(ce&&q>0)ce.value=(q*ingCost(f)).toFixed(2);
+    };
     modalBtns(box,close,function(){
+      const wIng=gv('wIng');
       const p={biz_id:SESSION.bizId,item_name:gv('wItem'),qty:parseFloat(gv('wQty'))||1,cost:parseFloat(gv('wCost'))||0,reason:gv('wReason'),date:new Date().toISOString()};
+      if(wIng)p.ingredient_id=wIng;
       if(!p.item_name){alert('Enter item name');return;}save('wastage',p,null);
     },'Log');
 
