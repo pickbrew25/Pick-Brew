@@ -436,7 +436,7 @@ function CHART_FILL(){
   return 'rgba('+parseInt(h.slice(0,2),16)+','+parseInt(h.slice(2,4),16)+','+parseInt(h.slice(4,6),16)+',0.9)';
 }
 let D={sales:[],expenses:[],products:[],employees:[],attendance:[],customers:[],credit:[],suppliers:[],pos:[],ingredients:[],recipes:[],wastage:[],orders:[],loans:[],leaves:[],shifts:[]};
-let UI={page:'overview',filter:'week',modal:null,loading:false};
+let UI={page:'overview',filter:'week',modal:null,loading:false,invCat:'all'};
 let CHARTS={};
 
 function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e;}
@@ -1157,38 +1157,171 @@ function renderSales(main,fs,rev){
   tbl.appendChild(tb);c.appendChild(tbl);main.appendChild(c);
 }
 
+/* ==================================================================== *
+ * INVENTORY — grouped by category
+ *
+ * This page used to be one flat list of every product, sorted only by
+ * stock level. A cafe with 120 items across eight categories had no way
+ * to look at just the pastries, and the only way to find a category's
+ * shortages was to read the whole list. It is now grouped per category,
+ * with a chip bar to narrow to one, and each category carries its own
+ * item count, shortage count and stock value.
+ *
+ * Sorting *inside* a category is still stock-ascending, so whatever is
+ * about to run out stays at the top where it was.
+ * ==================================================================== */
+
+/* Blank, null and whitespace-only categories all collapse to one bucket
+   rather than appearing as several different empty-looking groups. */
+function invCatOf(p){
+  var c=(p&&p.cat!==undefined&&p.cat!==null)?String(p.cat).trim():'';
+  return c||'Uncategorised';
+}
+
+/* 999 is the app's "not tracked" sentinel, so it contributes no countable
+   value — otherwise every unlimited item would add 999 x its price and the
+   figure would be nonsense. */
+function invStockValue(list){
+  return (list||[]).reduce(function(a,p){
+    if(p.stock===999)return a;
+    return a+((+p.price||0)*(+p.stock||0));
+  },0);
+}
+function invIsOut(p){return p.stock!==999&&p.stock<=0;}
+function invIsLow(p){return p.stock!==999&&p.stock>0&&p.stock<=5;}
+
+function invGroups(products){
+  var map={},order=[];
+  (products||[]).forEach(function(p){
+    var k=invCatOf(p);
+    if(!map[k]){map[k]=[];order.push(k);}
+    map[k].push(p);
+  });
+  order.sort(function(a,b){
+    if(a==='Uncategorised')return 1;          /* always last */
+    if(b==='Uncategorised')return -1;
+    return a.localeCompare(b);
+  });
+  return order.map(function(k){
+    /* .slice() first: the old code called D.products.sort(), which sorts
+       the shared array in place and left every other page reading a
+       list reordered by stock level as a side effect of visiting this
+       one. */
+    var items=map[k].slice().sort(function(x,y){
+      var xs=(x.stock===999)?Infinity:(+x.stock||0);
+      var ys=(y.stock===999)?Infinity:(+y.stock||0);
+      return xs-ys;
+    });
+    return {cat:k,items:items,
+      out:items.filter(invIsOut).length,
+      low:items.filter(invIsLow).length,
+      value:invStockValue(items)};
+  });
+}
+
+function invRow(p){
+  const isOut=invIsOut(p),isLow=invIsLow(p);
+  const r=el('div','row');
+  const rl=el('div','row-l');
+  rl.innerHTML='<div class="row-name">'+esc(p.name)+'</div>'
+    +'<div class="row-sub">'+esc(invCatOf(p))+' \u00b7 '+fmt(p.price)+'</div>';
+  const rr=el('div','row-r');
+  rr.appendChild(el('span','badge '+(isOut?'b-red':isLow?'b-amber':'b-green'),
+    p.stock===999?'Unlimited':isOut?'Out':isLow?p.stock+' low':p.stock+' in stock'));
+  const edBtn=el('button','sm-btn','Edit');
+  edBtn.style.cssText='padding:4px 10px;font-size:11px;border-radius:5px;border:1px solid var(--b2);background:none;color:var(--t2);cursor:pointer;margin-left:6px';
+  edBtn.onclick=function(){UI.modal={type:'product',item:p};render();};
+  rr.appendChild(edBtn);
+  r.appendChild(rl);r.appendChild(rr);
+  return r;
+}
+
 function renderInventory(main){
   const hRow=el('div','');hRow.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:8px';
   hRow.appendChild(el('div','page-title','Inventory'));
   const btnRow=el('div','');btnRow.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
-  const syncInvBtn=el('button','add-btn','⟳ Sync from POS');
-  syncInvBtn.onclick=async function(){syncInvBtn.textContent='Syncing...';syncInvBtn.disabled=true;await loadData();syncInvBtn.textContent='⟳ Sync from POS';syncInvBtn.disabled=false;};
+  const syncInvBtn=el('button','add-btn','\u27f3 Sync from POS');
+  syncInvBtn.onclick=async function(){syncInvBtn.textContent='Syncing...';syncInvBtn.disabled=true;await loadData();syncInvBtn.textContent='\u27f3 Sync from POS';syncInvBtn.disabled=false;};
   const addItemBtn=el('button','add-btn','+ Add Item');
   addItemBtn.style.cssText='background:var(--st);border-color:var(--st)';
   addItemBtn.onclick=function(){UI.modal={type:'product',item:null};render();};
   btnRow.appendChild(syncInvBtn);btnRow.appendChild(addItemBtn);
   hRow.appendChild(btnRow);main.appendChild(hRow);
-  const low=D.products.filter(function(p){return p.stock!==999&&p.stock>0&&p.stock<=5;}).length;
-  const out=D.products.filter(function(p){return p.stock!==999&&p.stock<=0;}).length;
+
+  const prods=D.products||[];
+  const groups=invGroups(prods);
+  const low=prods.filter(invIsLow).length;
+  const out=prods.filter(invIsOut).length;
+
   const sg=el('div','stats-grid');
-  sg.appendChild(statCard('Items',D.products.length,'',''));
+  sg.appendChild(statCard('Items',prods.length,'',''));
+  sg.appendChild(statCard('Categories',groups.length,'',''));
   sg.appendChild(statCard('Low stock',low,'','red'));
   sg.appendChild(statCard('Out of stock',out,'','red'));
+  sg.appendChild(statCard('Stock value',fmt(invStockValue(prods)),'at selling price',''));
   main.appendChild(sg);
-  const c=el('div','card');
-  const chd=el('div','card-hd','All products');chd.appendChild(addBtn('+ Add',function(){UI.modal={type:'product',item:null};render();}));c.appendChild(chd);
-  if(!D.products.length){const em=el('div','empty','No products yet. Tap <strong>+ Add Item</strong> above to add one, or sync from POS.');em.style.lineHeight='1.7';c.appendChild(em);main.appendChild(c);return;}
-  D.products.slice().sort(function(a,b){return a.stock-b.stock;}).forEach(function(p){
-    const isOut=p.stock!==999&&p.stock<=0;const isLow=p.stock!==999&&p.stock>0&&p.stock<=5;
-    const r=el('div','row');
-    const rl=el('div','row-l');rl.innerHTML='<div class="row-name">'+esc(p.name)+'</div><div class="row-sub">'+esc(p.cat)+' · '+fmt(p.price)+'</div>';
-    const rr=el('div','row-r');
-    rr.appendChild(el('span','badge '+(isOut?'b-red':isLow?'b-amber':'b-green'),p.stock===999?'Unlimited':isOut?'Out':isLow?p.stock+' low':p.stock+' in stock'));
-    const edBtn=el('button','sm-btn','Edit');edBtn.style.cssText='padding:4px 10px;font-size:11px;border-radius:5px;border:1px solid var(--b2);background:none;color:var(--t2);cursor:pointer;margin-left:6px';
-    edBtn.onclick=function(){UI.modal={type:'product',item:p};render();};
-    rr.appendChild(edBtn);r.appendChild(rl);r.appendChild(rr);c.appendChild(r);
+
+  if(!prods.length){
+    const c0=el('div','card');
+    const h0=el('div','card-hd','All products');
+    h0.appendChild(addBtn('+ Add',function(){UI.modal={type:'product',item:null};render();}));
+    c0.appendChild(h0);
+    const em=el('div','empty','No products yet. Tap <strong>+ Add Item</strong> above to add one, or sync from POS.');
+    em.style.lineHeight='1.7';c0.appendChild(em);main.appendChild(c0);return;
+  }
+
+  /* A category the operator just renamed or emptied would otherwise leave
+     the page filtered to something that no longer exists, showing nothing
+     and looking broken. */
+  if(UI.invCat&&UI.invCat!=='all'&&!groups.some(function(g){return g.cat===UI.invCat;}))
+    UI.invCat='all';
+  if(!UI.invCat)UI.invCat='all';
+
+  /* Only worth a chip bar once there is more than one category to pick. */
+  if(groups.length>1){
+    const fb=el('div','filter-bar');
+    const chip=function(label,id,tip){
+      const p=el('div','fp'+(UI.invCat===id?' on':''),esc(label));
+      /* The light theme styles .fp as a segmented control with the right
+         border only on :last-child. Category chips wrap onto several
+         lines, where that leaves a gap on the end of every row but the
+         last, so each chip carries its own right border. */
+      p.style.borderRightWidth='1.5px';
+      if(tip)p.title=tip;
+      p.onclick=function(){UI.invCat=id;render();};
+      return p;
+    };
+    fb.appendChild(chip('All \u00b7 '+prods.length,'all',
+      out?out+' out of stock across all categories':''));
+    groups.forEach(function(g){
+      /* A dot on the chip means this category needs attention, so a
+         shortage is visible without opening the category first. */
+      const flag=g.out?' \u25cf':(g.low?' \u25cb':'');
+      const tip=g.out?(g.out+' out of stock'+(g.low?', '+g.low+' low':''))
+                     :(g.low?g.low+' running low':'');
+      fb.appendChild(chip(g.cat+' \u00b7 '+g.items.length+flag,g.cat,tip));
+    });
+    main.appendChild(fb);
+  }
+
+  const shown=(UI.invCat==='all')?groups
+    :groups.filter(function(g){return g.cat===UI.invCat;});
+
+  shown.forEach(function(g){
+    const c=el('div','card');
+    const meta=g.items.length+' item'+(g.items.length===1?'':'s')
+      +(g.out?' \u00b7 '+g.out+' out':'')
+      +(g.low?' \u00b7 '+g.low+' low':'')
+      +' \u00b7 '+fmt(g.value);
+    const chd=el('div','card-hd',esc(g.cat)+' <span>'+esc(meta)+'</span>');
+    /* Adding from inside a category pre-fills that category, so building
+       out one section does not mean retyping it on every item. */
+    chd.appendChild(addBtn('+ Add',function(){
+      UI.modal={type:'product',item:null,defCat:(g.cat==='Uncategorised'?'':g.cat)};render();}));
+    c.appendChild(chd);
+    g.items.forEach(function(p){c.appendChild(invRow(p));});
+    main.appendChild(c);
   });
-  main.appendChild(c);
 }
 
 function renderExpenses(main,fe,rev,exp,net){
@@ -2372,7 +2505,9 @@ function renderModal(root){
     box.appendChild(el('div','modal-title',isNew?'Add product':'Edit product'));
     mfField(box,'pName','Product name','text',it.name,'e.g. Coffee, T-shirt');
     mfField(box,'pPrice','Price (PHP)','number',it.price||'','0');
-    mfField(box,'pCat','Category','text',it.cat||'','e.g. Drinks, Tops');
+    /* defCat is set when + Add is pressed inside a category card, so a
+       new product lands in the section the operator was looking at. */
+    mfField(box,'pCat','Category','text',it.cat||m.defCat||'','e.g. Drinks, Tops');
     mfField(box,'pStock','Stock (blank = unlimited)','number',(it.stock===999||it.stock==null)?'':it.stock,'');
     const iconDiv=el('div','mf');
     const iconLbl=el('label','','Icon code (optional)');iconDiv.appendChild(iconLbl);
